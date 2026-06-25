@@ -35,7 +35,7 @@ In addition to the raw X-API tools, a custom **`grok_x_search`** tool (patched i
   `grok-4-1-fast` (non-reasoning, cheaper/faster); set a `*-reasoning` model for
   deeper synthesis. (Change one line in `.env`, restart the service.)
 - **Egress:** xMCP now also reaches **`api.x.ai`** (Grok) alongside `api.x.com`.
-- **L4 detect:** free — the guardrail interceptor screens *all* `xmcp` results, so
+- **L4 detect:** free — the `GuardrailMiddleware` screens *all* tool results, so
   Grok answers are screened too.
 
 ## Hardened systemd service
@@ -77,27 +77,30 @@ tells the agent when/how to use the X tools and frames returned posts as untrust
 data. Verified end-to-end: the DeerFlow lead agent calls `searchPostsRecent` →
 `:8051` → X API → real posts.
 
-## Content screening — guardrail interceptor (2a.5, L4 detect)
+## Content screening — guardrail middleware (L4 detect)
 
-xMCP's returned X posts are screened through the guardrail service (`:8041`)
-**before** the agent sees them, via DeerFlow's config-only `mcpInterceptors` hook
-(no harness modification):
+xMCP's returned X content is screened through the guardrail service (`:8041`)
+**before** it reaches the model. Unlike the SAE instance (which screens via
+DeerFlow's `mcpInterceptors` hook), this public instance serves Claude directly, so
+screening is a **FastMCP middleware** — `shared/guardrail.py::GuardrailMiddleware`,
+registered in `server.py::create_mcp`:
 
-- Interceptor: `security/guardrail/deerflow-interceptor/` — made importable via
-  **`PYTHONPATH`** in `scripts/serve.sh` (NOT pip-installed; serve.sh's
-  `uv sync --all-packages` + `uv run` wipe any non-pyproject venv install). Referenced
-  in `extensions_config.json`: `"mcpInterceptors": ["guardrail_interceptor:build_guardrail_interceptor"]`.
-  Verified: gateway logs `Loaded MCP interceptor`, X results come back wrapped in
-  `<untrusted_x_content source="xmcp" trust="UNTRUSTED">`.
-- It wraps `xmcp` results: **allow** → `<untrusted_x_content>` delimiters; **block /
-  HITL / guardrail-down** → WITHHELD (fail closed). Error results pass through.
-  Drops `structuredContent` so the agent sees only the screened text.
+- It screens the RESULT of **every** tool call (all of them return untrusted X
+  content): **allow** → wrapped in `<untrusted_x_content source="xmcp"
+  trust="UNTRUSTED">`; **block / HITL / guardrail-down** → WITHHELD (fail closed).
+  Error and empty results pass through. Drops `structured_content` so the model
+  sees only the screened text.
+- **Order:** added *after* `ApprovalMiddleware`, so it sits INSIDE the approval gate
+  (FastMCP wraps `reversed(middleware)` → first-added is outermost). It only screens
+  results of calls the human already approved; a pending-approval message is never
+  screened. Toggle with `GUARDRAIL_ENABLED`; point at the service via `GUARDRAIL_URL`.
 - ⚠️ Guardrail is still **degraded** (HiddenASCII only) until the PromptGuard HF
   gated-model grant — so plaintext-injection detection isn't active yet.
 
-Tool **isolation** (the scoped `x-researcher` subagent — DeerFlow's allowed-tools
-is global-per-agent, verified to enforce) is sequenced with **2b** (no `trade`/
-`backtest` to isolate from until then).
+> **L4 isolate (not yet ported):** the SAE instance also has the deterministic
+> backstop — a tool-deprived `x-researcher` subagent (DeerFlow). On this Claude-facing
+> instance there is no subagent layer; today L4 rests on detect (degraded) + the
+> approval gate. Carrying an isolation equivalent over is tracked separately.
 
 ## What it is
 

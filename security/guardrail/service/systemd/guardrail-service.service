@@ -1,0 +1,19 @@
+[Unit]
+Description=Guardrail service (Layer-4 detect / LlamaFirewall PromptGuard + HiddenASCII)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wes/Documents/mcp-tools/security/guardrail/service
+ExecStart=/home/wes/.local/bin/uv run python service.py
+Restart=on-failure
+RestartSec=5
+Environment=PATH=/home/wes/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Loopback-only (127.0.0.1); screens untrusted X content for the x-mcp guardrail
+# middleware. THREAT-MODEL.md Layer 4 (detect leg). x-mcp fails CLOSED if this is down.
+Environment=GUARDRAIL_PORT=8041
+# Needed so PromptGuard resolves the HF token + model cache at ~/.cache/huggingface.
+Environment=HOME=/home/wes
+
+[Install]
+WantedBy=default.target

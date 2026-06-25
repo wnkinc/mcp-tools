@@ -1,0 +1,17 @@
+[project]
+name = "guardrail-service"
+version = "0.1.0"
+description = "Layer-4 guardrail service: LlamaFirewall PromptGuard + HiddenASCII injection screen over loopback (:8041). THREAT-MODEL.md Layer 4 (detect leg)."
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "llamafirewall==1.0.3",
+    # llamafirewall 1.0.3 imports `HfFolder`, removed in huggingface_hub 1.0 — cap it.
+    "huggingface_hub>=0.30.2,<1.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.11",
+]
+
+[tool.uv]
+# llamafirewall pulls torch + transformers (multi-GB) — kept in this service's
+# own venv so the heavy deps never leak into the MCP bridge or the srt path.

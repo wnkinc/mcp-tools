@@ -29,6 +29,7 @@ from requests_oauthlib import OAuth1Session
 # Google-OAuth provider used by every public-facing mcp-tools server.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from shared.auth import build_oauth_provider  # noqa: E402
+from shared.guardrail import GuardrailMiddleware  # noqa: E402
 
 HTTP_METHODS = {
     "get",
@@ -814,7 +815,14 @@ def create_mcp() -> FastMCP:
     # Gate EVERY tool (X-API + grok) behind out-of-band human approval. One middleware
     # covers all of them, including the auto-generated OpenAPI tools that can't take an
     # approval param. Exempt specific tools via XMCP_APPROVAL_EXEMPT.
+    # ORDER MATTERS: FastMCP wraps reversed(self.middleware), so the FIRST added is the
+    # OUTERMOST. Approval must be outermost (it short-circuits BEFORE the tool runs, so a
+    # pending-approval message is never screened); the guardrail sits INSIDE it and only
+    # screens results of calls the human already approved.
     mcp.add_middleware(ApprovalMiddleware())
+    # THREAT-MODEL L4 (detect): screen untrusted X content through the guardrail service
+    # (:8041) before it reaches the model. Fails CLOSED if the service is down.
+    mcp.add_middleware(GuardrailMiddleware(source="xmcp"))
 
     # Out-of-band human-in-the-loop approval page + Slack interactivity endpoint.
     @mcp.custom_route("/approve/{token}", methods=["GET", "POST"], include_in_schema=False)
