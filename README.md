@@ -19,7 +19,7 @@ mcp-tools/
     eval/                #   garak red-team harness
   tools/                 # one hardened system unit per tool (own loopback port + subdomain)
     x-mcp/               # X (Twitter) read-only search/lookup + Grok x_search (:8061)
-      server.py          #   vendored+patched FastMCP server (see VENDORED.md) + OAuth wiring
+      server.py          #   our FastMCP server on fastmcp.from_openapi (read-only X) + grok_x_search
       systemd/mcp-xmcp.service
       env.example
     data/                # market-data ingest into a canonical parquet data lake (:8062)
