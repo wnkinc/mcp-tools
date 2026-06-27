@@ -24,11 +24,11 @@ from fastmcp.tools.tool import ToolResult
 from oauthlib.oauth1 import Client as OAuth1Client
 from requests_oauthlib import OAuth1Session
 
-# PATCHED (mcp-tools): make the repo-root `shared/` package importable regardless
-# of the process CWD (systemd runs us from the tool dir), then pull in the shared
-# Google-OAuth provider used by every public-facing mcp-tools server.
+# PATCHED (mcp-tools): make the repo root importable regardless of the process CWD
+# (systemd runs us from the tool dir), then pull in the shared security helpers used
+# by every public-facing mcp-tools server.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from shared.auth import build_oauth_provider  # noqa: E402
+from security.auth import build_oauth_provider  # noqa: E402
 from security.guardrail.middleware import GuardrailMiddleware  # noqa: E402
 
 HTTP_METHODS = {

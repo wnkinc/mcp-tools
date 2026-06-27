@@ -4,9 +4,9 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
-# Make repo-root shared/ importable regardless of CWD, then load shared OAuth.
+# Make the repo root importable regardless of CWD, then load shared OAuth.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from shared.auth import build_oauth_provider  # noqa: E402
+from security.auth import build_oauth_provider  # noqa: E402
 
 import catalog  # noqa: E402
 
