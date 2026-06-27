@@ -8,10 +8,21 @@ runner collapses *into* this server (see ``runs.py``). The deterministic pipelin
 contract (``schema.py``) port over unchanged.
 
 Tools exposed:
-  data-ingest        — start an ingest; returns the summary, or a PENDING run_id
+  data-ingest        — start a bars ingest; returns the summary, or a PENDING run_id
   data-ingest-poll   — retrieve a slow run's summary by run_id
   data-ingest-cancel — best-effort cancel a run
-  data-read          — read canonical bars back out of the lake
+  data-read          — read canonical bars back out of the lake (cached)
+  equity-quote       — latest quote (live)
+  equity-fundamentals— income/balance/cash/metrics/dividends (live)
+  equity-profile     — company profile (live)
+  equity-estimates   — analyst price-target consensus (live)
+  equity-ownership   — share statistics / float / short interest (live)
+  equity-discovery   — market screens (gainers/losers/active/…) (live)
+
+Bars are fetched via OpenBB (yfinance provider) and ingested into a DuckDB-managed
+parquet lake (``store.py``) so repeat ranges hit cache. The ``equity-*`` tools are
+live read-through passthroughs over OpenBB — structured market data, hence trusted
+output (no guardrail).
 """
 import os
 import sys
@@ -24,6 +35,7 @@ from fastmcp import FastMCP
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from security.serve import serve  # noqa: E402
 
+import equity  # noqa: E402
 import pipeline  # noqa: E402
 import runs  # noqa: E402
 import store  # noqa: E402
@@ -162,10 +174,71 @@ def data_read(
     )
 
 
+# ── Live equity tools (read-through OpenBB; not lake-cached) ─────────────────
+
+
+@mcp.tool(name="equity-quote")
+def equity_quote(symbol: str, source: str = "yfinance") -> str:
+    """
+    Latest quote for one equity ``symbol`` (e.g. "AAPL"): price, bid/ask, day range,
+    volume, market cap, and related fields. Live — fetched fresh each call, not cached.
+    """
+    return equity.quote(symbol.strip().upper(), provider=source)
+
+
+@mcp.tool(name="equity-fundamentals")
+def equity_fundamentals(
+    symbol: str, statement: str = "income", limit: int = 4, source: str = "yfinance"
+) -> str:
+    """
+    A fundamental financial statement for ``symbol``. ``statement`` is one of:
+    income, balance, cash (each shows the last ``limit`` periods), or metrics, dividends.
+    Live — fetched fresh each call, not cached.
+    """
+    return equity.fundamentals(symbol.strip().upper(), statement, limit, provider=source)
+
+
+@mcp.tool(name="equity-profile")
+def equity_profile(symbol: str, source: str = "yfinance") -> str:
+    """
+    Company profile for ``symbol``: name, exchange, sector/industry, description, and
+    identifiers. Live — fetched fresh each call, not cached.
+    """
+    return equity.profile(symbol.strip().upper(), provider=source)
+
+
+@mcp.tool(name="equity-estimates")
+def equity_estimates(symbol: str, source: str = "yfinance") -> str:
+    """
+    Analyst price-target consensus and recommendation for ``symbol``.
+    Live — fetched fresh each call, not cached.
+    """
+    return equity.consensus(symbol.strip().upper(), provider=source)
+
+
+@mcp.tool(name="equity-ownership")
+def equity_ownership(symbol: str, source: str = "yfinance") -> str:
+    """
+    Share statistics for ``symbol``: shares outstanding, float, and short interest.
+    Live — fetched fresh each call, not cached.
+    """
+    return equity.share_statistics(symbol.strip().upper(), provider=source)
+
+
+@mcp.tool(name="equity-discovery")
+def equity_discovery(category: str = "gainers", limit: int = 20, source: str = "yfinance") -> str:
+    """
+    A market screen (not symbol-specific). ``category`` is one of: gainers, losers,
+    active, growth_tech, aggressive_small_caps, undervalued_growth, undervalued_large_caps.
+    Returns up to ``limit`` rows. Live — fetched fresh each call, not cached.
+    """
+    return equity.discovery(category, limit, provider=source)
+
+
 def main() -> None:
     load_env()
     port = int(os.getenv("MCP_PORT", "8062"))
-    # data returns trusted, internally-generated content -> no guardrail / approval.
+    # data returns trusted, structured market data -> no guardrail / approval.
     serve(mcp, port=port)
 
 

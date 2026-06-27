@@ -14,11 +14,18 @@ WorkingDirectory=/home/wes/Documents/mcp-tools/tools/data
 # MCP_PORT is read by main() BEFORE .env loads, so it MUST live here, not in .env.
 Environment=MCP_HOST=127.0.0.1
 Environment=MCP_PORT=8062
-Environment=HOME=/home/wes
 Environment=PATH=/home/wes/.local/bin:/usr/local/bin:/usr/bin:/bin
-# OAuth state stays writable under ProtectHome=read-only via StateDirectory (/var/lib/mcp-data).
+# OAuth/FastMCP state AND OpenBB's $HOME/.openbb_platform settings stay writable under
+# ProtectHome=read-only via the StateDirectory (/var/lib/mcp-data). HOME points there so
+# OpenBB (which derives its settings dir from Path.home()) writes inside it, not the
+# read-only real home. The data lake lives there too (DATA_ROOT below).
 StateDirectory=mcp-data
+Environment=HOME=%S/mcp-data
 Environment=FASTMCP_HOME=%S/mcp-data
+Environment=DATA_ROOT=%S/mcp-data/data
+# Freeze OpenBB's prebuilt accessor: never rebuild (i.e. never write into the read-only
+# venv) at import time. Prebuild at setup with `.venv/bin/python -c "import openbb"`.
+Environment=OPENBB_AUTO_BUILD=false
 
 # --- L2 egress: all outbound traffic MUST go through the egress proxy ---
 # This tool's per-tool squid listener (:8074) enforces its domain

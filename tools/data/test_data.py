@@ -94,23 +94,23 @@ def test_cancel_unknown_run():
 # ── schema / store / pipeline (no network) ──────────────────────────────────
 
 
-def _raw_yf_frame():
-    """A frame shaped like a single-ticker yfinance download (MultiIndex cols, Date index)."""
-    idx = pd.DatetimeIndex(["2024-01-02", "2024-01-03"], name="Date")
-    cols = pd.MultiIndex.from_tuples(
-        [("Open", "AAPL"), ("High", "AAPL"), ("Low", "AAPL"),
-         ("Close", "AAPL"), ("Adj Close", "AAPL"), ("Volume", "AAPL")]
-    )
+def _canonical_raw():
+    """A frame shaped like ``openbb_source.fetch`` output: canonical column names,
+    naive timestamps (enforce_canonical localizes to UTC)."""
     return pd.DataFrame(
-        [[1.0, 2.0, 0.5, 1.5, 1.4, 100], [1.5, 2.5, 1.0, 2.0, 1.9, 200]],
-        index=idx, columns=cols,
+        {
+            "timestamp": pd.to_datetime(["2024-01-02", "2024-01-03"]),
+            "open": [1.0, 1.5],
+            "high": [2.0, 2.5],
+            "low": [0.5, 1.0],
+            "close": [1.5, 2.0],
+            "volume": [100, 200],
+        }
     )
 
 
-def test_normalize_and_enforce_canonical():
-    import normalize
-
-    df = schema.enforce_canonical(normalize.from_yfinance(_raw_yf_frame()))
+def test_enforce_canonical_from_canonical_named():
+    df = schema.enforce_canonical(_canonical_raw())
     assert list(df.columns) == list(schema.CANONICAL_COLUMNS)
     assert str(df["timestamp"].dt.tz) == "UTC"
     assert df["open"].dtype == "float64"
@@ -122,11 +122,20 @@ def test_enforce_canonical_rejects_missing_columns():
         schema.enforce_canonical(pd.DataFrame({"open": [1.0]}))
 
 
+def test_obb_interval_mapping():
+    from sources import openbb_source
+
+    assert openbb_source.obb_interval("1wk") == "1W"  # yfinance weekly, not "1wk"
+    assert openbb_source.obb_interval("1mo") == "1M"  # yfinance monthly, not "1mo"
+    assert openbb_source.obb_interval("1d") == "1d"
+    with pytest.raises(ValueError):
+        openbb_source.obb_interval("3y")
+
+
 def test_store_roundtrip_and_request_window(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_ROOT", str(tmp_path))
-    import normalize
 
-    df = schema.enforce_canonical(normalize.from_yfinance(_raw_yf_frame()))
+    df = schema.enforce_canonical(_canonical_raw())
     store.write("bars", "yfinance", "AAPL", "1d", df, req_start="2024-01-01", req_end="2024-02-01")
 
     back = store.read("bars", "yfinance", "AAPL", "1d")
@@ -136,9 +145,8 @@ def test_store_roundtrip_and_request_window(tmp_path, monkeypatch):
 
 def test_store_covers_subset_and_superset(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_ROOT", str(tmp_path))
-    import normalize
 
-    df = schema.enforce_canonical(normalize.from_yfinance(_raw_yf_frame()))
+    df = schema.enforce_canonical(_canonical_raw())
     store.write("bars", "yfinance", "AAPL", "1d", df, req_start="2024-01-01", req_end="2024-02-01")
 
     assert store.covers("bars", "yfinance", "AAPL", "1d", "2024-01-01", "2024-02-01") is True
@@ -150,15 +158,14 @@ def test_store_covers_subset_and_superset(tmp_path, monkeypatch):
 
 def test_pipeline_cache_hit_skips_fetch(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_ROOT", str(tmp_path))
-    import normalize
 
     fetch_calls = {"n": 0}
 
     def fake_fetch(symbol, interval, start, end):
         fetch_calls["n"] += 1
-        return _raw_yf_frame()
+        return _canonical_raw()
 
-    monkeypatch.setitem(pipeline._SOURCES, "yfinance", (fake_fetch, normalize.from_yfinance))
+    monkeypatch.setitem(pipeline._SOURCES, "yfinance", fake_fetch)
 
     r1 = pipeline.ingest("AAPL", "1d", "2024-01-01", "2024-02-01")
     assert r1["cached"] is False and fetch_calls["n"] == 1

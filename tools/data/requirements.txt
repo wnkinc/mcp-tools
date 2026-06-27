@@ -7,8 +7,15 @@
 fastmcp==3.4.2
 mcp==1.28.0
 python-dotenv==1.2.2
-# Ingest pipeline deps (the heavyweight bits the SAE two-process split existed to
-# isolate; here they live only in this tool's venv):
+# Data engine. DuckDB is the parquet reader/writer + cache catalog (replaced the
+# hand-rolled pyarrow store). pandas is the in-memory frame (OpenBB -> enforce -> store).
+duckdb==1.5.4
 pandas==3.0.3
-pyarrow==24.0.0
-yfinance==1.4.1
+# OpenBB market-data: core framework + the equity command extension + the yfinance
+# provider extension. Commands and providers are SEPARATE extensions on purpose; adding
+# a source = another provider ext, adding a data type = another command ext. yfinance +
+# pyarrow are now TRANSITIVE (pulled by openbb-yfinance / unused respectively), so they
+# are no longer listed here. After install, prebuild the accessor: `python -c "import openbb"`.
+openbb-core==1.6.13
+openbb-equity==1.6.2
+openbb-yfinance==1.6.3

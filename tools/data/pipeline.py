@@ -8,18 +8,18 @@ from __future__ import annotations
 
 import pandas as pd
 
-import normalize
 import store
 from schema import KIND_BARS, enforce_canonical
-from sources import yfinance as yfinance_source
+from sources import openbb_source
 
-# source name → (raw fetcher, raw→canonical normalizer)
+# source name → fetcher returning a canonical-NAMED frame (OpenBB already normalizes,
+# so there is no separate raw→canonical step anymore; enforce_canonical does the rest).
 _SOURCES = {
-    yfinance_source.SOURCE: (yfinance_source.fetch, normalize.from_yfinance),
+    openbb_source.SOURCE: openbb_source.fetch,
 }
 
 DEFAULT_INTERVAL = "1d"
-DEFAULT_SOURCE = yfinance_source.SOURCE
+DEFAULT_SOURCE = openbb_source.SOURCE
 
 
 def _summary(symbol, interval, source, df, path, *, cached) -> dict:
@@ -57,15 +57,14 @@ def ingest(
     interval = (interval or DEFAULT_INTERVAL).strip()
     if source not in _SOURCES:
         raise ValueError(f"Unknown source {source!r}. Supported: {sorted(_SOURCES)}")
-    fetch, to_canonical = _SOURCES[source]
+    fetch = _SOURCES[source]
 
     if not refresh and store.covers(KIND_BARS, source, symbol, interval, start, end):
         existing = store.read(KIND_BARS, source, symbol, interval)
         path = store.path_for(KIND_BARS, source, symbol, interval)
         return _summary(symbol, interval, source, existing, path, cached=True)
 
-    raw = fetch(symbol, interval, start, end)
-    df = enforce_canonical(to_canonical(raw))
+    df = enforce_canonical(fetch(symbol, interval, start, end))
     if df.empty:
         raise ValueError(
             f"No data returned for symbol={symbol!r} interval={interval!r} "
