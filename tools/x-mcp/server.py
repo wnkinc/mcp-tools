@@ -360,11 +360,12 @@ def create_mcp() -> FastMCP:
         },
     )
 
-    # x-mcp's tools come from FastMCP.from_openapi, whose OpenAPIProvider generates them
-    # dynamically -- serve()'s LocalProvider strip can't reach them, so their
-    # FastMCP-derived outputSchema (which breaks the Claude connector, #25081) must be
-    # nulled at BUILD time here via mcp_component_fn. Honors the same MCP_KEEP_OUTPUT_SCHEMA
-    # escape hatch as serve().
+    # x-mcp is guardrailed (main() calls serve(untrusted_output=True)): the guardrail nulls
+    # each result's structuredContent, so any tool advertising an outputSchema then fails
+    # the Claude connector's output validation (outputSchema with no structuredContent).
+    # serve() strips the LocalProvider tools (grok), but these from_openapi tools live in a
+    # dynamic OpenAPIProvider serve() can't reach -- so they must be stripped HERE, at build
+    # time, via mcp_component_fn. Same MCP_KEEP_OUTPUT_SCHEMA escape hatch as serve().
     keep_output_schema = is_truthy(os.getenv("MCP_KEEP_OUTPUT_SCHEMA", "0"))
 
     def _strip_output_schema(_route, component) -> None:
