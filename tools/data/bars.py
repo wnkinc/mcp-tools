@@ -1,8 +1,8 @@
 """Historical OHLCV bars via OpenBB (yfinance provider), persisted to a parquet lake.
 
-Unlike the live ``equity.*`` tools, bars are *kept*: each ingest fetches the requested
-window from OpenBB and merges it into a per-symbol parquet file, so the file accumulates
-history across calls. OpenBB's standardized frame is persisted as-is — its own schema,
+Bars are *kept*: each ingest fetches the requested window from OpenBB and merges it into
+a per-symbol parquet file, so the file accumulates history across calls. OpenBB's
+standardized frame is persisted as-is — its own schema,
 its own ``date`` index — with no canonical re-clean; the only bookkeeping is de-duplicating
 on the timestamp index so overlapping re-fetches don't double a bar.
 

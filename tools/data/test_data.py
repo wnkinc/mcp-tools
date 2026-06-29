@@ -2,8 +2,7 @@
 
 ``bars._fetch`` (the only networked call) is monkeypatched so the parquet
 merge/dedupe/append logic is exercised against an in-process tmp lake without
-hitting Yahoo Finance. The live ``equity.*`` tools are thin OpenBB passthroughs
-with no local logic to unit-test offline.
+hitting Yahoo Finance.
 """
 
 import pandas as pd

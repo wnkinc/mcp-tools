@@ -22,10 +22,9 @@ mcp-tools/
       server.py          #   our FastMCP server on fastmcp.from_openapi (read-only X) + grok_x_search
       systemd/mcp-xmcp.service
       env.example
-    data/                # market data via OpenBB, persisted to a parquet lake (:8062)
+    data/                # historical market data via OpenBB, persisted to a parquet lake (:8062)
       server.py          #   FastMCP server (OAuth) + the MCP tools
       bars.py            #   fetch bars via OpenBB + persist (merge/dedupe/append)
-      equity.py          #   live OpenBB equity passthroughs (quote/fundamentals/…)
       systemd/mcp-data.service
     hamilton/            # research library: catalog of reusable indicators/signals (:8064)
       server.py          #   FastMCP server (OAuth) + catalog

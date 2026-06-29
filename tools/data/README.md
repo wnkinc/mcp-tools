@@ -1,22 +1,19 @@
-# data — market data via OpenBB, persisted to a parquet lake
+# data — historical market data via OpenBB, persisted to a parquet lake
 
-A self-hosted MCP server for market data, built as a thin read-through over
+A self-hosted MCP server for historical market data, built as a thin read-through over
 [OpenBB](https://openbb.co) (yfinance provider). **Bars** are fetched and *persisted*
 to a plain parquet lake — each ingest merges into the symbol's file (de-duplicated on
-timestamp), so a download is kept and accumulates across calls. A set of **live
-`equity-*` tools** expose the rest of OpenBB's equity surface (quote, fundamentals,
-profile, estimates, ownership, discovery) as pure passthroughs. Exposed to the Claude
+timestamp), so a download is kept and accumulates across calls. Exposed to the Claude
 apps over the standard mcp-tools security spine.
 
 ```
 Claude app ──HTTPS──► Cloudflare Tunnel ──► this server (loopback :8062, OAuth-gated)
                                                   │
-                          ┌───────────────────────┴───────────────────────┐
-                          ▼                                                 ▼
-            bars: OpenBB (yfinance) ──► parquet (merge + dedupe)    equity-*: OpenBB
-                          │                                          (live, not persisted)
-                          ▼
-            <DATA_ROOT>/bars/yfinance/<SYMBOL>/<interval>.parquet
+                                                  ▼
+                          bars: OpenBB (yfinance) ──► parquet (merge + dedupe)
+                                                  │
+                                                  ▼
+                          <DATA_ROOT>/bars/yfinance/<SYMBOL>/<interval>.parquet
 ```
 
 ## Design
@@ -56,21 +53,14 @@ ingest always hits OpenBB, then folds the result into what's stored.
 | File | Role |
 |---|---|
 | `bars.py` | fetch bars via OpenBB + persist to parquet (merge/dedupe/append); read back |
-| `equity.py` | live (non-persisted) OpenBB equity passthroughs |
 | `server.py` | FastMCP server: OAuth wiring + the MCP tools |
 
 ## MCP tools
 
-| Tool | Purpose | Persisted? |
-|---|---|---|
-| `data-ingest` | fetch bars and merge them into the parquet lake → summary | lake |
-| `data-read` | read stored bars back out of the lake (read-only) | lake |
-| `equity-quote` | latest quote (price, bid/ask, day range, market cap) | live |
-| `equity-fundamentals` | income / balance / cash / metrics / dividends | live |
-| `equity-profile` | company profile (name, exchange, sector, identifiers) | live |
-| `equity-estimates` | analyst price-target consensus + recommendation | live |
-| `equity-ownership` | shares outstanding / float / short interest | live |
-| `equity-discovery` | market screens (gainers/losers/active/…) | live |
+| Tool | Purpose |
+|---|---|
+| `data-ingest` | fetch bars and merge them into the parquet lake → summary |
+| `data-read` | read stored bars back out of the lake (read-only) |
 
 `data-ingest` args: `symbol`, `interval?="1d"` (OpenBB's vocabulary:
 `1m/2m/5m/15m/30m/60m/90m/1h/1d/5d/1W/1M/1Q`), `start?`/`end?` (ISO `YYYY-MM-DD`; omit

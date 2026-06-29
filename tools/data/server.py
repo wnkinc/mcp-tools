@@ -1,19 +1,12 @@
-"""MCP server: market-data tools over OpenBB (yfinance provider).
+"""MCP server: historical market-data tools over OpenBB (yfinance provider).
 
-Every tool is a thin read-through over OpenBB. Bars are additionally *persisted* to a
-plain parquet lake (``bars.py``) so a download is kept and accumulates across calls;
-the ``equity-*`` tools are pure live passthroughs. All return structured market data,
-hence trusted output (no guardrail).
+Bars are fetched through OpenBB and *persisted* to a plain parquet lake (``bars.py``)
+so a download is kept and accumulates across calls. Returns trusted, structured market
+data (no guardrail).
 
 Tools exposed:
   data-ingest        — fetch bars and merge them into the parquet lake
   data-read          — read stored bars back out of the lake
-  equity-quote       — latest quote (live)
-  equity-fundamentals— income/balance/cash/metrics/dividends (live)
-  equity-profile     — company profile (live)
-  equity-estimates   — analyst price-target consensus (live)
-  equity-ownership   — share statistics / float / short interest (live)
-  equity-discovery   — market screens (gainers/losers/active/…) (live)
 """
 import os
 import sys
@@ -27,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from security.serve import serve  # noqa: E402
 
 import bars  # noqa: E402
-import equity  # noqa: E402
 
 mcp = FastMCP(name="data")
 
@@ -104,67 +96,6 @@ def data_read(
         f"Stored at {path}\n\n"
         f"{view.to_string()}"
     )
-
-
-# ── Live equity tools (read-through OpenBB; not lake-cached) ─────────────────
-
-
-@mcp.tool(name="equity-quote")
-def equity_quote(symbol: str, source: str = "yfinance") -> str:
-    """
-    Latest quote for one equity ``symbol`` (e.g. "AAPL"): price, bid/ask, day range,
-    volume, market cap, and related fields. Live — fetched fresh each call, not cached.
-    """
-    return equity.quote(symbol.strip().upper(), provider=source)
-
-
-@mcp.tool(name="equity-fundamentals")
-def equity_fundamentals(
-    symbol: str, statement: str = "income", limit: int = 4, source: str = "yfinance"
-) -> str:
-    """
-    A fundamental financial statement for ``symbol``. ``statement`` is one of:
-    income, balance, cash (each shows the last ``limit`` periods), or metrics, dividends.
-    Live — fetched fresh each call, not cached.
-    """
-    return equity.fundamentals(symbol.strip().upper(), statement, limit, provider=source)
-
-
-@mcp.tool(name="equity-profile")
-def equity_profile(symbol: str, source: str = "yfinance") -> str:
-    """
-    Company profile for ``symbol``: name, exchange, sector/industry, description, and
-    identifiers. Live — fetched fresh each call, not cached.
-    """
-    return equity.profile(symbol.strip().upper(), provider=source)
-
-
-@mcp.tool(name="equity-estimates")
-def equity_estimates(symbol: str, source: str = "yfinance") -> str:
-    """
-    Analyst price-target consensus and recommendation for ``symbol``.
-    Live — fetched fresh each call, not cached.
-    """
-    return equity.consensus(symbol.strip().upper(), provider=source)
-
-
-@mcp.tool(name="equity-ownership")
-def equity_ownership(symbol: str, source: str = "yfinance") -> str:
-    """
-    Share statistics for ``symbol``: shares outstanding, float, and short interest.
-    Live — fetched fresh each call, not cached.
-    """
-    return equity.share_statistics(symbol.strip().upper(), provider=source)
-
-
-@mcp.tool(name="equity-discovery")
-def equity_discovery(category: str = "gainers", limit: int = 20, source: str = "yfinance") -> str:
-    """
-    A market screen (not symbol-specific). ``category`` is one of: gainers, losers,
-    active, growth_tech, aggressive_small_caps, undervalued_growth, undervalued_large_caps.
-    Returns up to ``limit`` rows. Live — fetched fresh each call, not cached.
-    """
-    return equity.discovery(category, limit, provider=source)
 
 
 def main() -> None:
