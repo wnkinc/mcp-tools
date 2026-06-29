@@ -12,13 +12,15 @@ python-dotenv==1.2.2
 pandas==3.0.3
 pyarrow==24.0.0
 # OpenBB market-data: core framework + command extensions (one per DATA TYPE: equity,
-# crypto) + provider extensions (one per SOURCE: yfinance, tiingo). Commands and providers
-# are SEPARATE on purpose: a new data type = a command ext + a fn in feeds.py + a tool; a
-# new source for an EXISTING data type = just a provider ext (no new code, used via
-# source="tiingo"). yfinance is TRANSITIVE (pulled by openbb-yfinance). After install/adding
-# an extension, prebuild the accessor: `python -c "import openbb"`. tiingo needs TIINGO_API_KEY.
+# crypto, currency/FX) + provider extensions (one per SOURCE: yfinance, tiingo). Commands
+# and providers are SEPARATE on purpose: a new data type = a command ext + a fn in feeds.py
+# + a tool; a new source for an EXISTING data type = just a provider ext (no new code).
+# yfinance is TRANSITIVE (pulled by openbb-yfinance). After install/adding an extension,
+# prebuild the accessor: `python -c "import openbb"`. tiingo (the fixed provider) needs
+# TIINGO_API_KEY.
 openbb-core==1.6.13
 openbb-equity==1.6.2
 openbb-crypto==1.6.2
+openbb-currency==1.6.2
 openbb-yfinance==1.6.3
 openbb-tiingo==1.6.1

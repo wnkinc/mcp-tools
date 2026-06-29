@@ -95,46 +95,57 @@ def test_read_missing_returns_none(tmp_path, monkeypatch):
 # ── feeds: OpenBB endpoint wrappers (fake obb, no network) ───────────────────
 
 
-def _fake_obb(equity_cap, crypto_cap, df):
-    """A stand-in ``obb`` whose equity/crypto ``price.historical`` record their kwargs."""
+def _fake_obb(caps, df):
+    """A stand-in ``obb`` whose <namespace>.price.historical records its kwargs into caps[ns]."""
     def endpoint(cap):
         def historical(**kwargs):
             cap.update(kwargs)
             return SimpleNamespace(to_df=lambda: df)
         return SimpleNamespace(price=SimpleNamespace(historical=historical))
-    return SimpleNamespace(equity=endpoint(equity_cap), crypto=endpoint(crypto_cap))
+    return SimpleNamespace(**{ns: endpoint(cap) for ns, cap in caps.items()})
+
+
+def _caps():
+    return {"equity": {}, "crypto": {}, "currency": {}}
 
 
 def test_equity_bars_calls_equity_endpoint(monkeypatch):
-    eq, cr = {}, {}
+    caps = _caps()
     df = _frame(["2024-01-02"], [1.0])
-    monkeypatch.setattr(feeds, "_obb", lambda: _fake_obb(eq, cr, df))
+    monkeypatch.setattr(feeds, "_obb", lambda: _fake_obb(caps, df))
 
     out = feeds.equity_bars("AAPL", "1d", "2024-01-01", "2024-01-10")
     assert out is df
-    assert cr == {}  # crypto endpoint untouched
-    assert eq == {
+    assert caps["crypto"] == {} and caps["currency"] == {}  # only equity touched
+    assert caps["equity"] == {
         "symbol": "AAPL", "interval": "1d", "start_date": "2024-01-01",
         "end_date": "2024-01-10", "provider": "tiingo",  # the fixed default provider
     }
 
 
 def test_crypto_bars_calls_crypto_endpoint(monkeypatch):
-    eq, cr = {}, {}
-    df = _frame(["2024-01-02"], [1.0])
-    monkeypatch.setattr(feeds, "_obb", lambda: _fake_obb(eq, cr, df))
+    caps = _caps()
+    monkeypatch.setattr(feeds, "_obb", lambda: _fake_obb(caps, _frame(["2024-01-02"], [1.0])))
 
-    out = feeds.crypto_bars("BTC-USD", provider="yfinance")
-    assert out is df
-    assert eq == {}  # equity endpoint untouched
-    assert cr["symbol"] == "BTC-USD" and cr["provider"] == "yfinance"
+    feeds.crypto_bars("BTC-USD", provider="yfinance")
+    assert caps["equity"] == {} and caps["currency"] == {}
+    assert caps["crypto"]["symbol"] == "BTC-USD" and caps["crypto"]["provider"] == "yfinance"
+
+
+def test_fx_bars_calls_currency_endpoint(monkeypatch):
+    caps = _caps()
+    monkeypatch.setattr(feeds, "_obb", lambda: _fake_obb(caps, _frame(["2024-01-02"], [1.0])))
+
+    feeds.fx_bars("EURUSD", "1d", "2024-01-01", "2024-01-10")
+    assert caps["equity"] == {} and caps["crypto"] == {}
+    assert caps["currency"]["symbol"] == "EURUSD" and caps["currency"]["provider"] == "tiingo"
 
 
 def test_provider_passthrough(monkeypatch):
-    eq, cr = {}, {}
-    monkeypatch.setattr(feeds, "_obb", lambda: _fake_obb(eq, cr, _frame(["2024-01-02"], [1.0])))
+    caps = _caps()
+    monkeypatch.setattr(feeds, "_obb", lambda: _fake_obb(caps, _frame(["2024-01-02"], [1.0])))
     feeds.equity_bars("AAPL", provider="tiingo")  # source flows straight through to OpenBB
-    assert eq["provider"] == "tiingo"
+    assert caps["equity"]["provider"] == "tiingo"
 
 
 # ── feeds: provider credential injection (no OpenBB import) ───────────────────

@@ -64,3 +64,13 @@ def crypto_bars(
     return _obb().crypto.price.historical(
         symbol=symbol, interval=interval, start_date=start, end_date=end, provider=provider
     ).to_df()
+
+
+def fx_bars(
+    symbol: str, interval: str = "1d", start: str | None = None,
+    end: str | None = None, provider: str = DEFAULT_PROVIDER,
+) -> pd.DataFrame:
+    """Historical OHLC bars for an FX pair (e.g. EURUSD). FX frames carry no volume."""
+    return _obb().currency.price.historical(
+        symbol=symbol, interval=interval, start_date=start, end_date=end, provider=provider
+    ).to_df()

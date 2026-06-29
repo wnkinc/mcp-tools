@@ -1,11 +1,11 @@
 # data — historical market data via OpenBB, persisted to a parquet lake
 
 A self-hosted MCP server for historical market data, built as a thin read-through over
-[OpenBB](https://openbb.co). OHLCV **bars** (equity + crypto today) are fetched from
-**Tiingo** (the fixed provider — deep intraday history; needs `TIINGO_API_KEY`) and
-*persisted* to a plain parquet lake — each ingest merges into the symbol's file
-(de-duplicated on timestamp), so a download is kept and accumulates across calls. Exposed
-to the Claude apps over the standard mcp-tools security spine.
+[OpenBB](https://openbb.co). **Bars** (equity, crypto, FX today) are fetched from
+**Tiingo** (the fixed provider — deep intraday history, years of 1m bars; needs
+`TIINGO_API_KEY`) and *persisted* to a plain parquet lake — each ingest merges into the
+symbol's file (de-duplicated on timestamp), so a download is kept and accumulates across
+calls. Exposed to the Claude apps over the standard mcp-tools security spine.
 
 ```
 Claude app ──HTTPS──► Cloudflare Tunnel ──► this server (loopback :8062, OAuth-gated)
@@ -55,10 +55,10 @@ OpenBB's own schema, its own `date` index.
 ## The store
 
 Plain parquet, readable by any pandas/pyarrow/duckdb consumer. Self-describing layout —
-the path is the metadata; the first segment is the dataset namespace (`equity`, `crypto`):
+the path is the metadata; the first segment is the dataset namespace (`equity`, `crypto`, `fx`):
 
 ```
-<DATA_ROOT>/<asset>/<source>/<symbol>/<interval>.parquet   e.g. var/data/equity/tiingo/AAPL/1d.parquet
+<DATA_ROOT>/<asset>/<source>/<symbol>/<interval>.parquet   e.g. var/data/fx/tiingo/EURUSD/1d.parquet
 ```
 
 Each ingest fetches the requested window and **merges** it into that file, de-duplicated
@@ -73,12 +73,14 @@ then folds the result into what's stored.
 |---|---|
 | `equity-ingest` | fetch equity OHLCV bars and merge them into the lake → summary |
 | `crypto-ingest` | fetch crypto OHLCV bars and merge them into the lake → summary |
+| `fx-ingest` | fetch FX (currency pair) OHLC bars and merge them into the lake → summary |
 | `data-read` | read stored bars back out of the lake (any `asset`; read-only) |
 
-`*-ingest` args: `symbol` (Tiingo crypto is hyphen-less, e.g. `BTCUSD`), `interval?="1d"`
-(OpenBB's vocabulary: `1m/2m/5m/15m/30m/60m/90m/1h/1d/5d/1W/1M/1Q`), `start?`/`end?` (ISO
-`YYYY-MM-DD`), `refresh?=false`. No `source` — the provider is fixed to Tiingo.
-`data-read` takes `asset` (`equity`|`crypto`), `symbol`, `interval?="1d"`, `tail?=10`.
+`*-ingest` args: `symbol` (Tiingo-style: crypto/FX are hyphen-less, e.g. `BTCUSD`,
+`EURUSD`), `interval?="1d"` (OpenBB's vocabulary: `1m/2m/5m/15m/30m/60m/90m/1h/1d/5d/1W/1M/1Q`),
+`start?`/`end?` (ISO `YYYY-MM-DD`), `refresh?=false`. No `source` — the provider is fixed
+to Tiingo. `data-read` takes `asset` (`equity`|`crypto`|`fx`), `symbol`, `interval?="1d"`,
+`tail?=10`.
 
 ## Setup & run
 

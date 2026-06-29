@@ -14,6 +14,7 @@ Equity + crypto are fetched from Tiingo (fixed provider — no source choice; se
 Tools exposed:
   equity-ingest — fetch equity OHLCV bars and merge them into the lake
   crypto-ingest — fetch crypto OHLCV bars and merge them into the lake
+  fx-ingest     — fetch FX (currency pair) OHLC bars and merge them into the lake
   data-read     — read stored bars back out of the lake (any asset)
 """
 import os
@@ -97,6 +98,26 @@ def crypto_ingest(
     return _fmt(lake.ingest(("crypto", feeds.DEFAULT_PROVIDER, symbol, interval), df, refresh=refresh))
 
 
+@mcp.tool(name="fx-ingest")
+def fx_ingest(
+    symbol: str,
+    interval: str = "1d",
+    start: str | None = None,
+    end: str | None = None,
+    refresh: bool = False,
+) -> str:
+    """
+    Fetch FX (currency pair) OHLC bars from Tiingo and persist them to the parquet lake.
+
+    Same behavior as equity-ingest but for a currency pair ``symbol`` (e.g. "EURUSD",
+    "GBPUSD", "USDJPY"). FX frames carry OHLC but no volume. Merges into the stored file
+    de-duplicated on timestamp. ``interval``/``start``/``end``/``refresh`` work identically.
+    """
+    symbol = (symbol or "").strip().upper()
+    df = feeds.fx_bars(symbol, interval, start, end)
+    return _fmt(lake.ingest(("fx", feeds.DEFAULT_PROVIDER, symbol, interval), df, refresh=refresh))
+
+
 @mcp.tool(name="data-read")
 def data_read(
     asset: str,
@@ -107,8 +128,8 @@ def data_read(
     """
     Read stored bars back out of the parquet lake (ingest them first).
 
-    ``asset`` is the dataset namespace: "equity" or "crypto". Returns the last ``tail``
-    rows (default 10) of stored OHLCV bars for ``asset``/``symbol``/``interval`` as text,
+    ``asset`` is the dataset namespace: "equity", "crypto", or "fx". Returns the last
+    ``tail`` rows (default 10) of stored bars for ``asset``/``symbol``/``interval`` as text,
     plus the total row count and the stored file path. Reads only — never fetches.
     """
     asset = (asset or "").strip().lower()
