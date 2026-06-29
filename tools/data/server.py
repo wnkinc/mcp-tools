@@ -69,8 +69,10 @@ def equity_ingest(
     file, de-duplicated on timestamp — so the file accumulates history across calls
     (fetch 2024 today, 2023 tomorrow, keep both). ``interval`` is OpenBB's bar size (1m,
     2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1W, 1M, 1Q; default 1d). ``start``/``end`` are
-    ISO dates (YYYY-MM-DD), and Tiingo serves deep intraday history (years of 1m bars).
-    Pass ``refresh=true`` to replace the stored file instead of merging.
+    ISO dates (YYYY-MM-DD). For deep INTRADAY history just pass the full ``start``/``end``
+    range you want — the tool pages Tiingo's 10k-bar-per-request cap automatically, so a
+    multi-year 1m pull works in one call (just allow more time for it). Pass ``refresh=true``
+    to replace the stored file instead of merging.
     """
     symbol = (symbol or "").strip().upper()
     df = feeds.equity_bars(symbol, interval, start, end)

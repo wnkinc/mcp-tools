@@ -148,6 +148,51 @@ def test_provider_passthrough(monkeypatch):
     assert caps["equity"]["provider"] == "tiingo"
 
 
+# ── feeds: Tiingo intraday pagination (the 10k-bar cap walk) ──────────────────
+
+
+def test_intraday_pagination_assembles_full_range(monkeypatch):
+    """A capped, end-anchored tiingo intraday endpoint is paged into the full window."""
+    monkeypatch.setattr(feeds, "_TIINGO_CAP", 10)  # tiny cap so 25 bars need multiple pages
+    universe = pd.DataFrame(
+        {"close": range(25)},
+        index=pd.DatetimeIndex(
+            pd.date_range("2021-01-01", periods=25, freq="D", tz="UTC"), name="date"
+        ),
+    )
+    ends = []
+
+    def fake_fetch(namespace, symbol, interval, start, end, provider):
+        ends.append(end)
+        sub = universe
+        if start is not None:
+            sub = sub[sub.index.date >= pd.Timestamp(start).date()]
+        if end is not None:
+            sub = sub[sub.index.date <= pd.Timestamp(end).date()]
+        return sub.tail(feeds._TIINGO_CAP)  # end-anchored cap, like Tiingo
+
+    monkeypatch.setattr(feeds, "_fetch", fake_fetch)
+
+    out = feeds.equity_bars("AAPL", "1m", "2021-01-01", "2021-01-25", provider="tiingo")
+    assert len(out) == 25  # full range assembled despite the cap
+    assert out.index.is_monotonic_increasing and not out.index.duplicated().any()
+    assert len(ends) >= 3  # took several backward pages, not one call
+
+
+def test_daily_never_paginates(monkeypatch):
+    """Daily bars skip the pager even at/over the cap (they don't hit Tiingo's intraday limit)."""
+    calls = {"n": 0}
+
+    def fake_fetch(namespace, symbol, interval, start, end, provider):
+        calls["n"] += 1
+        return _frame([f"2024-01-{d:02d}" for d in range(1, 21)], list(range(20)))
+
+    monkeypatch.setattr(feeds, "_TIINGO_CAP", 5)
+    monkeypatch.setattr(feeds, "_fetch", fake_fetch)
+    feeds.equity_bars("AAPL", "1d", "2024-01-01", "2024-01-20", provider="tiingo")
+    assert calls["n"] == 1  # exactly one fetch — no paging for daily
+
+
 # ── feeds: provider credential injection (no OpenBB import) ───────────────────
 
 
