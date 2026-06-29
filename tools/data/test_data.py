@@ -179,6 +179,36 @@ def test_intraday_pagination_assembles_full_range(monkeypatch):
     assert len(ends) >= 3  # took several backward pages, not one call
 
 
+def test_intraday_pagination_partial_on_rate_limit(monkeypatch):
+    """A mid-walk failure keeps the pages already fetched and marks the frame partial."""
+    monkeypatch.setattr(feeds, "_TIINGO_CAP", 10)
+    universe = pd.DataFrame(
+        {"close": range(25)},
+        index=pd.DatetimeIndex(
+            pd.date_range("2021-01-01", periods=25, freq="D", tz="UTC"), name="date"
+        ),
+    )
+    state = {"calls": 0}
+
+    def fake_fetch(namespace, symbol, interval, start, end, provider):
+        state["calls"] += 1
+        if state["calls"] == 3:  # 3rd request 429s, like Tiingo's hourly cap
+            raise RuntimeError("You have run over your hourly request allocation")
+        sub = universe
+        if start is not None:
+            sub = sub[sub.index.date >= pd.Timestamp(start).date()]
+        if end is not None:
+            sub = sub[sub.index.date <= pd.Timestamp(end).date()]
+        return sub.tail(feeds._TIINGO_CAP)
+
+    monkeypatch.setattr(feeds, "_fetch", fake_fetch)
+
+    out = feeds.equity_bars("AAPL", "1m", "2021-01-01", "2021-01-25", provider="tiingo")
+    assert out.attrs.get("partial") == "Tiingo hourly rate limit reached"
+    assert 0 < len(out) < 25  # kept the 2 pages fetched before the failure, not all 25
+    assert not out.index.duplicated().any()
+
+
 def test_daily_never_paginates(monkeypatch):
     """Daily bars skip the pager even at/over the cap (they don't hit Tiingo's intraday limit)."""
     calls = {"n": 0}

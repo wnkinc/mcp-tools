@@ -65,6 +65,14 @@ def _fetch(namespace, symbol, interval, start, end, provider) -> pd.DataFrame:
     ).to_df()
 
 
+def _partial_reason(exc) -> str:
+    """Classify a mid-walk fetch failure for the partial-result note."""
+    msg = str(exc).lower()
+    if "allocation" in msg or "429" in msg or "rate" in msg:
+        return "Tiingo hourly rate limit reached"
+    return f"fetch interrupted ({type(exc).__name__})"
+
+
 def _bars(namespace, symbol, interval, start, end, provider) -> pd.DataFrame:
     """Fetch bars, paging Tiingo's end-anchored intraday cap so the full window is assembled.
 
@@ -73,6 +81,11 @@ def _bars(namespace, symbol, interval, start, end, provider) -> pd.DataFrame:
     window ending the day before the earliest bar held — until we reach ``start`` (or a short
     page signals the start of available data). Frames are concatenated, de-duplicated on the
     timestamp index, and sorted.
+
+    **Graceful partial:** if a page fails mid-walk (Tiingo's free tier caps requests per
+    hour, so a deep pull can run out), the pages already fetched are kept and returned with
+    ``df.attrs["partial"]`` set — the caller persists what it got and the lake's merge lets a
+    later re-run extend further back. Only the *first* fetch failing propagates (nothing yet).
     """
     df = _fetch(namespace, symbol, interval, start, end, provider)
     paged = (
@@ -84,9 +97,14 @@ def _bars(namespace, symbol, interval, start, end, provider) -> pd.DataFrame:
     start_date = pd.Timestamp(start).date()
     frames = [df]
     earliest = df.index.min()
+    partial = None
     while earliest.date() > start_date:
         chunk_end = (earliest.date() - dt.timedelta(days=1)).isoformat()
-        prev = _fetch(namespace, symbol, interval, start, chunk_end, provider)
+        try:
+            prev = _fetch(namespace, symbol, interval, start, chunk_end, provider)
+        except Exception as exc:  # noqa: BLE001 — keep the pages already fetched
+            partial = _partial_reason(exc)
+            break
         if prev.empty or prev.index.min().date() >= earliest.date():
             break  # no backward progress -> stop (avoids an infinite loop)
         frames.append(prev)
@@ -94,7 +112,10 @@ def _bars(namespace, symbol, interval, start, end, provider) -> pd.DataFrame:
         if len(prev) < _TIINGO_CAP:
             break  # short page -> reached the start of available history
     out = pd.concat(frames)
-    return out[~out.index.duplicated(keep="last")].sort_index()
+    out = out[~out.index.duplicated(keep="last")].sort_index()
+    if partial is not None:
+        out.attrs["partial"] = partial
+    return out
 
 
 def equity_bars(

@@ -45,13 +45,47 @@ def load_env() -> None:
     load_dotenv(env_path, override=True)
 
 
-def _fmt(s: dict) -> str:
-    """Render a lake.ingest summary as a model-facing line."""
-    return (
+def _fmt(s: dict, partial: str | None = None) -> str:
+    """Render a lake.ingest summary as a model-facing line (+ a partial-result note)."""
+    line = (
         f"Ingested {s['key']}: fetched {s['fetched']}, +{s['added']} new "
         f"→ {s['rows']} stored ({s['start']} → {s['end']}).\n"
         f"Stored at {s['path']}"
     )
+    if partial:
+        line += (
+            f"\n⚠️ PARTIAL — stopped early ({partial}). Stored only back to {s['start']}; "
+            f"re-run the same ingest later (refresh=false) to extend further back. Do NOT "
+            f"keep retrying now — it will stay rate-limited until the hourly window resets."
+        )
+    return line
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "allocation" in msg or "429" in msg
+
+
+def _ingest(asset: str, fetch, symbol, interval, start, end, refresh) -> str:
+    """Shared ingest body: fetch via a feed → persist → format, with a clean rate-limit message.
+
+    A mid-walk rate limit comes back as a *partial* frame (kept, flagged); a rate limit on
+    the very first fetch means nothing was retrieved, so return a clean note instead of
+    surfacing a raw provider exception to the model.
+    """
+    symbol = (symbol or "").strip().upper()
+    try:
+        df = fetch(symbol, interval, start, end)
+    except Exception as exc:  # noqa: BLE001
+        if _is_rate_limit(exc):
+            return (
+                "Rate limited — Tiingo's hourly request allocation is exhausted; nothing was "
+                "ingested. Wait for the hourly window to reset, then retry. Do NOT keep "
+                "retrying now."
+            )
+        raise
+    summary = lake.ingest((asset, feeds.DEFAULT_PROVIDER, symbol, interval), df, refresh=refresh)
+    return _fmt(summary, partial=df.attrs.get("partial"))
 
 
 @mcp.tool(name="equity-ingest")
@@ -71,12 +105,12 @@ def equity_ingest(
     2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1W, 1M, 1Q; default 1d). ``start``/``end`` are
     ISO dates (YYYY-MM-DD). For deep INTRADAY history just pass the full ``start``/``end``
     range you want — the tool pages Tiingo's 10k-bar-per-request cap automatically, so a
-    multi-year 1m pull works in one call (just allow more time for it). Pass ``refresh=true``
-    to replace the stored file instead of merging.
+    multi-year 1m pull works in one call (just allow more time for it). On Tiingo's free
+    tier a deep pull can exhaust the hourly request limit and return a PARTIAL result; just
+    re-run later (refresh stays false) and the lake merges it to extend coverage. Pass
+    ``refresh=true`` to replace the stored file instead of merging.
     """
-    symbol = (symbol or "").strip().upper()
-    df = feeds.equity_bars(symbol, interval, start, end)
-    return _fmt(lake.ingest(("equity", feeds.DEFAULT_PROVIDER, symbol, interval), df, refresh=refresh))
+    return _ingest("equity", feeds.equity_bars, symbol, interval, start, end, refresh)
 
 
 @mcp.tool(name="crypto-ingest")
@@ -95,9 +129,7 @@ def crypto_ingest(
     file de-duplicated on timestamp, accumulating history across calls.
     ``interval``/``start``/``end``/``refresh`` work identically.
     """
-    symbol = (symbol or "").strip().upper()
-    df = feeds.crypto_bars(symbol, interval, start, end)
-    return _fmt(lake.ingest(("crypto", feeds.DEFAULT_PROVIDER, symbol, interval), df, refresh=refresh))
+    return _ingest("crypto", feeds.crypto_bars, symbol, interval, start, end, refresh)
 
 
 @mcp.tool(name="fx-ingest")
@@ -115,9 +147,7 @@ def fx_ingest(
     "GBPUSD", "USDJPY"). FX frames carry OHLC but no volume. Merges into the stored file
     de-duplicated on timestamp. ``interval``/``start``/``end``/``refresh`` work identically.
     """
-    symbol = (symbol or "").strip().upper()
-    df = feeds.fx_bars(symbol, interval, start, end)
-    return _fmt(lake.ingest(("fx", feeds.DEFAULT_PROVIDER, symbol, interval), df, refresh=refresh))
+    return _ingest("fx", feeds.fx_bars, symbol, interval, start, end, refresh)
 
 
 @mcp.tool(name="data-read")
