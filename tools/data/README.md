@@ -28,10 +28,17 @@ The code is split so your *owned* surface stays constant as capabilities grow:
 
 OpenBB does the fetch *and* the normalization (its standardized model returns
 canonical-named OHLCV), so there is no hand-rolled downloader or normalizer. Commands and
-providers are *separate* extensions: each data type is a command ext (`openbb-equity`,
-`openbb-crypto`) on top of the shared `openbb-yfinance` provider. **Adding a capability =
-a fn in `feeds.py` + a tool in `server.py` (+ its command extension); `lake.py` is
-untouched.**
+providers are *separate* extensions: each **data type** is a command ext (`openbb-equity`,
+`openbb-crypto`); each **source** is a provider ext (`openbb-yfinance`, `openbb-tiingo`).
+Two kinds of growth, two costs:
+
+- **New data type** = a command ext + a fn in `feeds.py` + a tool in `server.py`.
+- **New source for an existing data type** = just a provider ext — *no new code*. Because
+  OpenBB standardizes across providers, it's used via `source="tiingo"` on the same feed
+  fn. (Keyed providers like tiingo need a token; `feeds._apply_credentials` injects it
+  from the env onto `obb.user.credentials`, since OpenBB doesn't read credential env vars.)
+
+`lake.py` is untouched by either.
 
 Persistence is just pandas + parquet (via pyarrow) — no store engine, no cache catalog.
 `lake.ingest` writes with `DataFrame.to_parquet`; a re-ingest reads the existing file,
@@ -45,7 +52,7 @@ Plain parquet, readable by any pandas/pyarrow/duckdb consumer. Self-describing l
 the path is the metadata; the first segment is the dataset namespace (`equity`, `crypto`):
 
 ```
-<DATA_ROOT>/<asset>/<source>/<symbol>/<interval>.parquet   e.g. var/data/crypto/yfinance/BTC-USD/1d.parquet
+<DATA_ROOT>/<asset>/<source>/<symbol>/<interval>.parquet   e.g. var/data/equity/tiingo/AAPL/1d.parquet
 ```
 
 Each ingest fetches the requested window and **merges** it into that file, de-duplicated
@@ -64,8 +71,9 @@ then folds the result into what's stored.
 
 `*-ingest` args: `symbol`, `interval?="1d"` (OpenBB's vocabulary:
 `1m/2m/5m/15m/30m/60m/90m/1h/1d/5d/1W/1M/1Q`), `start?`/`end?` (ISO `YYYY-MM-DD`; omit
-both = the provider's default window, ~1y for yfinance), `source?="yfinance"`,
-`refresh?=false`. `data-read` also takes `asset` (`equity`|`crypto`) and `tail?=10`.
+both = the provider's default window, ~1y for yfinance), `source?="yfinance"` (provider:
+`yfinance` or `tiingo`), `refresh?=false`. `data-read` also takes `asset`
+(`equity`|`crypto`) and `tail?=10`.
 
 ## Setup & run
 
@@ -97,12 +105,14 @@ lines for `:8074`, `sudo scripts/install-system.sh`, then
 | `OPENBB_AUTO_BUILD` | `false` (unit) | freeze the prebuilt accessor; never rebuild at import |
 | `HOME` | StateDirectory (unit) | OpenBB derives `$HOME/.openbb_platform` from this; must be writable |
 | `DATA_ROOT` | `<tool>/var/data` | data-lake root (set to the StateDirectory on the unit) |
+| `TIINGO_API_KEY` | _(empty)_ | required only for `source="tiingo"` (empty = tiingo disabled) |
 
 ## Egress
 
 Under the L2 egress wall a tool can only reach hosts in its allowlist
-(`security/egress-proxy/allowlist/data.txt`). All commands use the **yfinance** provider,
-so the data hosts are Yahoo Finance (`.finance.yahoo.com`, `query1`/`query2`, `fc.yahoo.com`);
+(`security/egress-proxy/allowlist/data.txt`). The **yfinance** provider hits Yahoo Finance
+(`.finance.yahoo.com`, `query1`/`query2`, `fc.yahoo.com`); the **tiingo** provider adds
+`api.tiingo.com` (only when `source="tiingo"`);
 the **Google OAuth** hosts are there because with `MCP_AUTH_ENABLED=1` the server verifies
 tokens + fetches JWKS server-side through the same proxy (so a missing host fails *login*
 closed, not just data). OpenBB does no network at import (the accessor is prebuilt and

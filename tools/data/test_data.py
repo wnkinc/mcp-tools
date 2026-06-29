@@ -128,3 +128,27 @@ def test_crypto_bars_calls_crypto_endpoint(monkeypatch):
     assert out is df
     assert eq == {}  # equity endpoint untouched
     assert cr["symbol"] == "BTC-USD" and cr["provider"] == "yfinance"
+
+
+def test_provider_passthrough(monkeypatch):
+    eq, cr = {}, {}
+    monkeypatch.setattr(feeds, "_obb", lambda: _fake_obb(eq, cr, _frame(["2024-01-02"], [1.0])))
+    feeds.equity_bars("AAPL", provider="tiingo")  # source flows straight through to OpenBB
+    assert eq["provider"] == "tiingo"
+
+
+# ── feeds: provider credential injection (no OpenBB import) ───────────────────
+
+
+def test_apply_credentials_injects_token_from_env(monkeypatch):
+    monkeypatch.setenv("TIINGO_API_KEY", "tok-123")
+    creds = SimpleNamespace(tiingo_token=None)
+    feeds._apply_credentials(SimpleNamespace(user=SimpleNamespace(credentials=creds)))
+    assert creds.tiingo_token == "tok-123"
+
+
+def test_apply_credentials_noop_without_env(monkeypatch):
+    monkeypatch.delenv("TIINGO_API_KEY", raising=False)
+    creds = SimpleNamespace(tiingo_token=None)
+    feeds._apply_credentials(SimpleNamespace(user=SimpleNamespace(credentials=creds)))
+    assert creds.tiingo_token is None

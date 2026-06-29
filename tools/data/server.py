@@ -68,7 +68,8 @@ def equity_ingest(
     (fetch 2024 today, 2023 tomorrow, keep both). ``interval`` is OpenBB's bar size (1m,
     2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1W, 1M, 1Q; default 1d). ``start``/``end`` are
     ISO dates (YYYY-MM-DD); omit both for the provider's default window (yfinance: ~1y).
-    Pass ``refresh=true`` to replace the stored file with just this fetch instead of merging.
+    ``source`` is the OpenBB provider: "yfinance" (default, no key) or "tiingo" (needs
+    TIINGO_API_KEY). Pass ``refresh=true`` to replace the stored file instead of merging.
     """
     symbol = (symbol or "").strip().upper()
     df = feeds.equity_bars(symbol, interval, start, end, source)

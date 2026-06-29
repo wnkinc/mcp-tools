@@ -5,20 +5,41 @@ standardized DataFrame **as-is** (OpenBB's own schema + ``date`` index). No pers
 no MCP — just the fetch. Adding a capability = add a function here (+ a tool in
 ``server.py``); the persistence layer (``lake.py``) is untouched.
 
-Each historical endpoint is a separate OpenBB *command extension* (``openbb-equity``,
-``openbb-crypto``, …) on top of the shared yfinance *provider* extension; see
-``requirements.txt``. Re-run the accessor prebuild after adding one.
+Each *data type* is a command extension (``openbb-equity``, ``openbb-crypto``); each
+*data source* is a provider extension (``openbb-yfinance``, ``openbb-tiingo``). Because
+OpenBB standardizes across providers, a new provider for an existing data type is nearly
+free — it's just another ``provider=`` value on the same feed fn, no new code. Re-run the
+accessor prebuild after adding any extension.
+
+Keyed providers (e.g. tiingo) need a token. OpenBB does NOT read credential env vars, so
+we inject them from the env (``.env``) onto ``obb.user.credentials`` — see
+``_CREDENTIALS`` / ``_apply_credentials``. yfinance needs no key.
 """
 from __future__ import annotations
+
+import os
 
 import pandas as pd
 
 DEFAULT_PROVIDER = "yfinance"
 
+# env var -> the obb.user.credentials attribute it populates. Add a keyed provider here.
+_CREDENTIALS = {"TIINGO_API_KEY": "tiingo_token"}
+
+
+def _apply_credentials(obb) -> None:
+    """Inject provider tokens from the env onto OpenBB's credential store (idempotent)."""
+    creds = obb.user.credentials
+    for env_var, attr in _CREDENTIALS.items():
+        token = os.getenv(env_var)
+        if token and getattr(creds, attr, None) != token:
+            setattr(creds, attr, token)
+
 
 def _obb():
     from openbb import obb
 
+    _apply_credentials(obb)
     return obb
 
 

@@ -8,6 +8,9 @@ query1.finance.yahoo.com
 query2.finance.yahoo.com
 fc.yahoo.com
 
+# Tiingo — OpenBB tiingo provider REST API (only hit when source="tiingo").
+api.tiingo.com
+
 # Google OAuth — the public instance verifies tokens + fetches JWKS server-side.
 # (Confirm the exact set from the access log on first login.)
 accounts.google.com
