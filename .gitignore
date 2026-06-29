@@ -5,6 +5,7 @@ __pycache__/
 venv/
 env/
 .pytest_cache/
+.ruff_cache/
 
 # Secrets: never commit. Each tool keeps its own .env (see <tool>/env.example).
 .env
