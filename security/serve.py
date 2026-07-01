@@ -40,6 +40,22 @@ def _csv_set(value: str | None) -> set[str]:
     return {item.strip() for item in value.split(",") if item.strip()}
 
 
+def _env_override(name: str, default: bool) -> bool:
+    """Substrate override of a per-tool security default.
+
+    The tool's ``serve(...)`` call declares INTENT (e.g. xmcp is ``untrusted_output=True``).
+    A substrate may flip it by env: unset/blank -> keep the tool's default (the safe
+    baseline travels with the code); set -> explicit on/off for THIS deploy. So the
+    desktop/stdio substrate turns the public-only layers off and the tunnel/cloud leaves
+    them on -- ONE image, N postures. Ambiguity keeps the default: silence never silently
+    weakens a tool.
+    """
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return _is_truthy(raw)
+
+
 def _strip_local_output_schemas(mcp) -> None:  # type: ignore[no-untyped-def]
     """Null the ``output_schema`` of every locally-registered tool (@mcp.tool / add_tool).
 
@@ -75,7 +91,7 @@ def serve(
     guardrail_source: str | None = None,
     approval_exempt_env: str = "MCP_APPROVAL_EXEMPT",
 ) -> None:
-    """Apply the shared security layers to ``mcp`` and run it over HTTP.
+    """Apply the shared security layers to ``mcp`` and run it (transport via env).
 
     ORDER MATTERS: FastMCP wraps ``reversed(middleware)``, so the first-added is the
     OUTERMOST. Approval must be outermost — it short-circuits BEFORE the tool runs, so
@@ -83,6 +99,15 @@ def serve(
     screening only results of calls the human already approved.
     """
     host = host or os.getenv("MCP_HOST", "127.0.0.1")
+
+    # SECURITY POSTURE: each layer's default is this tool's serve(...) arg; a substrate
+    # may flip it by env (docs SUBSTRATE matrix). Auth is already env-gated one layer
+    # down (build_oauth_provider reads MCP_AUTH_ENABLED); these bring approval + guardrail
+    # to the same maturity, so the whole posture is one env-readable table. Flipping
+    # MCP_UNTRUSTED_OUTPUT on is a promise the substrate must honor: GUARDRAIL_URL has to
+    # resolve to a running screener or every call fails closed at the middleware.
+    require_approval = _env_override("MCP_REQUIRE_APPROVAL", require_approval)
+    untrusted_output = _env_override("MCP_UNTRUSTED_OUTPUT", untrusted_output)
 
     if require_approval:
         mcp.add_middleware(ApprovalMiddleware(exempt=_csv_set(os.getenv(approval_exempt_env))))
@@ -102,4 +127,17 @@ def serve(
     if auth is not None:
         mcp.auth = auth
 
-    mcp.run(transport="http", host=host, port=port)
+    # RUNTIME SELECTOR: the transport is chosen by env at startup, not baked in, so the
+    # SAME tool rides every substrate (see docs SUBSTRATE matrix). Default "http" keeps
+    # the hardened-host systemd deploy byte-for-byte unchanged; a desktop/uvx substrate
+    # sets MCP_TRANSPORT=stdio (host/port then irrelevant). Fail closed on typos rather
+    # than silently picking a transport the operator didn't ask for.
+    transport = os.getenv("MCP_TRANSPORT", "http").strip().lower()
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    elif transport == "http":
+        mcp.run(transport="http", host=host, port=port)
+    else:
+        raise ValueError(
+            f"Unsupported MCP_TRANSPORT={transport!r}; expected 'http' or 'stdio'."
+        )
