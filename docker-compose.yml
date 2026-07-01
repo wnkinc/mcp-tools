@@ -53,9 +53,13 @@ services:
       GUARDRAIL_ENABLED: "1"
       # x-mcp needs its read-only app bearer to fetch X's OpenAPI spec + data.
       X_BEARER_TOKEN: ${X_BEARER_TOKEN:?set X_BEARER_TOKEN in your shell or a .env file}
+    volumes:
+      # Writable state (FASTMCP_HOME): OAuth client registrations + tokens when auth is on.
+      - xmcp-state:/app/state
     depends_on:
       guardrail:
         condition: service_healthy   # tool waits until the screener is actually ready
 
 volumes:
   guardrail-hf-cache:
+  xmcp-state:

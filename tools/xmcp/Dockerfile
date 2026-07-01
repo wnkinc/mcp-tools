@@ -43,20 +43,30 @@ ENV PATH="/app/.venv/bin:$PATH" \
     # Container substrate defaults (a compose file / task def overrides as needed):
     MCP_HOST=0.0.0.0 \
     MCP_PORT=8061 \
-    MCP_TRANSPORT=http
+    MCP_TRANSPORT=http \
+    # Writable state carve-out -- the container analog of the systemd StateDirectory.
+    # With auth on, FastMCP's OAuth proxy persists client registrations + tokens here;
+    # /app itself is root-owned and non-writable to the app user. Mount a volume at this
+    # path (see docker-compose.yml) to persist OAuth state across restarts.
+    FASTMCP_HOME=/app/state
 
 COPY --from=builder /app/.venv /app/.venv
 # The tool imports the shared security/ package at ../../security (parents[2] == /app).
 COPY security/ /app/security/
 COPY tools/xmcp/ /app/tools/xmcp/
 
+# Writable state dir owned by the non-root user (FASTMCP_HOME points here).
+RUN mkdir -p /app/state && chown app:app /app/state
+
 USER app
 WORKDIR /app/tools/xmcp
 EXPOSE 8061
 
-# Liveness: the MCP HTTP transport answers on MCP_PORT. (Guardrail reachability is a
+# Liveness: the MCP HTTP transport listens on MCP_PORT. A TCP connect is the right probe
+# -- the MCP endpoint is /mcp and speaks a handshake (a plain GET 404/406s), so "is the
+# port accepting connections" is the honest up/down signal. (Guardrail reachability is a
 # separate concern owned by the guardrail sidecar's own healthcheck.)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import os,urllib.request; urllib.request.urlopen(f\"http://127.0.0.1:{os.environ.get('MCP_PORT','8061')}/\", timeout=3)" || exit 1
+    CMD python -c "import os,socket; socket.create_connection(('127.0.0.1', int(os.environ.get('MCP_PORT','8061'))), timeout=3).close()" || exit 1
 
 ENTRYPOINT ["python", "server.py"]
