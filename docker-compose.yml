@@ -28,6 +28,7 @@ services:
   guardrail:
     build: ./security/guardrail/service
     image: mcp-guardrail
+    restart: unless-stopped
     # No published port: internal to the compose network only -- a true sidecar. Reached
     # by the tool as http://guardrail:8071. Uncomment to inspect /healthz from the host.
     # ports: ["8071:8071"]
@@ -55,6 +56,7 @@ services:
       context: .
       dockerfile: tools/xmcp/Dockerfile
     image: mcp-xmcp
+    restart: unless-stopped
     # No published host port ON PURPOSE: xmcp is on the `internal` network (the egress
     # wall), and Docker cannot publish a host port from an internal-only container. Ingress
     # is a substrate's job -- the cloudflared sidecar in docker-compose.tunnel.yml reaches
@@ -98,6 +100,7 @@ services:
       context: .
       dockerfile: tools/quant/Dockerfile
     image: mcp-quant
+    restart: unless-stopped
     environment:
       MCP_HOST: 0.0.0.0
       MCP_TRANSPORT: http
@@ -118,6 +121,7 @@ services:
       context: .
       dockerfile: tools/data/Dockerfile
     image: mcp-data
+    restart: unless-stopped
     environment:
       MCP_HOST: 0.0.0.0
       MCP_TRANSPORT: http
