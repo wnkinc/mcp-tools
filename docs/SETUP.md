@@ -1,11 +1,10 @@
 # Setup runbook — x-mcp as the first Claude-connected tool
 
-Goal: `https://xmcp.secure-agentic-engineering.com/mcp` reachable from Claude
-desktop, web, and mobile, gated by "Sign in with Google" locked to your account.
+Goal: `https://xmcp.secure-agentic-engineering.com/mcp` reachable from Claude desktop,
+web, and mobile, gated by "Sign in with Google" locked to your account.
 
-Prereqs already in place on this box: Cloudflare Tunnel `cloudflared-openclaw`
-(tunnel id in `~/.cloudflared/config.yml`), domain `secure-agentic-engineering.com`
-on Cloudflare, `sudo` access (for the one-time bootstrap), `uv`/Python.
+Prereqs on this box: Docker + compose, a Cloudflare Tunnel (id + `credentials-file` in
+`~/.cloudflared/`), domain on Cloudflare, an X app bearer token.
 
 ---
 
@@ -14,118 +13,86 @@ on Cloudflare, `sudo` access (for the one-time bootstrap), `uv`/Python.
 In the [Google Cloud Console](https://console.cloud.google.com/):
 
 1. **Create / pick a project** (e.g. `mcp-tools`).
-2. **APIs & Services → OAuth consent screen:**
-   - User type **External**.
-   - App name (e.g. `MCP Tools`), your support email, developer email.
-   - Scopes: the defaults (`openid`, `.../auth/userinfo.email`) are enough — no
-     sensitive scopes, so **no Google verification review** is required.
-   - **Test users:** add every email that should have access (this is Google's
-     native allowlist while the app stays in "Testing"). Leave publishing status
-     as **Testing**.
-3. **APIs & Services → Credentials → Create credentials → OAuth client ID:**
-   - Application type **Web application**.
-   - **Authorized redirect URIs:** `https://xmcp.secure-agentic-engineering.com/auth/callback`
-   - Create → copy **Client ID** and **Client secret**.
+2. **OAuth consent screen:** User type **External**; app name + your emails; scopes
+   `openid` + `.../auth/userinfo.email` (no sensitive scopes → no review). Add every
+   allowed email as a **Test user**; leave status **Testing**.
+3. **Credentials → Create OAuth client ID:** type **Web application**; redirect URI
+   `https://xmcp.secure-agentic-engineering.com/auth/callback`. Copy the **Client ID**
+   and **Client secret**.
 
-(One OAuth client covers all future tools; each new subdomain just adds another
-redirect URI here.)
+(One OAuth client covers all tools; each new subdomain just adds another redirect URI.)
 
 ## 2. Fill secrets  (you)
 
 ```bash
 cp tools/xmcp/env.example tools/xmcp/.env   # .env is gitignored
 ```
-Edit `tools/xmcp/.env`:
-- `X_BEARER_TOKEN=` — your X app bearer (read-only).
-- `X_API_TOOL_ALLOWLIST=` — e.g. `getUsersByUsername,searchPostsRecent,getUsersPosts`.
-- `XAI_API_KEY=` — only if you want the `grok_x_search` tool.
-- `MCP_AUTH_ENABLED=1`
-- `GOOGLE_CLIENT_ID=` / `GOOGLE_CLIENT_SECRET=` — from step 1.
-- `MCP_ALLOWED_GOOGLE_EMAILS=` — your Google email (comma-separated for more);
-  must also be a "test user" on the consent screen while it's in Testing.
+Set in `tools/xmcp/.env`: `X_BEARER_TOKEN`, `X_API_TOOL_ALLOWLIST` (e.g.
+`getUsersByUsername,searchPostsRecent`), `XAI_API_KEY` (only for `grok_x_search`),
+`MCP_AUTH_ENABLED=1`, `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (step 1), and
+`MCP_ALLOWED_GOOGLE_EMAILS` (your Google email; also a Test user above).
 
-Create the venv + install deps (if not already done):
+Stage the tunnel credentials for the ingress sidecar (gitignored):
 ```bash
-uv venv tools/xmcp/.venv
-uv pip install --python tools/xmcp/.venv/bin/python -r tools/xmcp/requirements.txt
+mkdir -p security/ingress/secrets
+cp ~/.cloudflared/<TUNNEL_ID>.json security/ingress/secrets/creds.json
 ```
+Confirm the route for this host in `security/ingress/cloudflared.config.yml`
+(`xmcp.secure-agentic-engineering.com → http://xmcp:8061`).
 
-## 3. Install + start the service (one-time bootstrap)
+## 3. Bring up the public stack
 
-The tools run as hardened **system** units behind a loopback egress proxy (squid),
-both installed by a single root bootstrap. See `docs/ARCHITECTURE.md` for why system
-units (the `IPAddressDeny` egress wall only enforces there) and
-`security/egress-proxy/README.md` for the proxy.
-
+Only one tunnel connector may run — stop any host one first:
 ```bash
-sudo scripts/install-system.sh
+systemctl --user disable --now cloudflared-openclaw   # if it exists
+X_BEARER_TOKEN=... docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
 ```
-Idempotent. It installs squid + the per-tool allowlists, the mcp-tool system units
-into `/etc/systemd/system` (enabled at boot), a scoped passwordless-sudoers drop-in
-(so restarts need no password), journal-read access, and starts the units. After it
-runs, manage the service with plain `systemctl` (the sudoers drop-in covers it):
+This starts the tools + guardrail + egress wall + the Cloudflare ingress, with auth
+**on** (the overlay). Watch it:
 ```bash
-systemctl status mcp-xmcp --no-pager
+docker compose ps
+docker compose logs -f xmcp        # expect: "OAuth enabled (Google) at https://xmcp..."
 ```
-Local sanity check (loopback) — the server and the egress proxy:
-```bash
-curl -s http://127.0.0.1:8061/.well-known/oauth-authorization-server | head -c 400; echo
-curl -s -x http://127.0.0.1:8073 https://example.com   # -> 403 (not allowlisted = wall works)
-```
+(Local, auth-off dev instead: `X_BEARER_TOKEN=... docker compose up --build`.)
 
-## 4. Cloudflare route
+## 4. Verify the public endpoint (the #410 check)
 
 ```bash
-scripts/add-tunnel-route.sh xmcp.secure-agentic-engineering.com 8061
-```
-This adds the ingress rule (above the 404 catch-all), creates the proxied DNS
-record, and restarts the tunnel. **Do not** add a Cloudflare Access policy to
-`xmcp.*` — confirm no wildcard Access app covers it (Zero Trust → Access →
-Applications). If one does, add a bypass for this hostname.
-
-## 5. Verify the public endpoint (the #410 check)
-
-```bash
-# OAuth server metadata present:
-curl -s https://xmcp.secure-agentic-engineering.com/.well-known/oauth-authorization-server | python -m json.tool | head
-# Protected-resource metadata present:
-curl -s https://xmcp.secure-agentic-engineering.com/.well-known/oauth-protected-resource/mcp
+curl -s https://xmcp.secure-agentic-engineering.com/.well-known/oauth-authorization-server | head -c 300; echo
+curl -s https://xmcp.secure-agentic-engineering.com/.well-known/oauth-protected-resource/mcp; echo
 # 401 MUST carry WWW-Authenticate with resource_metadata=... :
-curl -sD - -o /dev/null -X POST https://xmcp.secure-agentic-engineering.com/mcp \
-  -H 'Accept: application/json, text/event-stream' \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -i www-authenticate
+curl -sD - -o /dev/null https://xmcp.secure-agentic-engineering.com/mcp | grep -i www-authenticate
 ```
-The last command must print a `WWW-Authenticate: Bearer ... resource_metadata=...`
-line. (Confirmed working against the local app during the build.)
+The last line must print `WWW-Authenticate: Bearer ... resource_metadata=...`.
 
-## 6. Add the custom connector in Claude
+## 5. Add the custom connector in Claude
 
-- **Desktop (macOS):** Settings → Connectors → Add custom connector →
-  `https://xmcp.secure-agentic-engineering.com/mcp` → Connect → Google login.
-- **claude.ai web:** Settings → Connectors → Add custom connector → same URL →
-  Connect → Google login. **Mobile** inherits it from your account.
-
-Then test from each surface, e.g. ask Claude to run `searchPostsRecent` or
-`grok_x_search`.
+Settings → Connectors → Add custom connector →
+`https://xmcp.secure-agentic-engineering.com/mcp` → Connect → Google login. Works on
+**desktop** and **claude.ai web**; **mobile** inherits it. Then ask Claude to run
+`searchPostsRecent` or `grok_x_search`.
 
 ---
 
 ## Troubleshooting
 
-- **"Authorization with the MCP server failed" on web/mobile, before any login** —
-  the `WWW-Authenticate` header is missing. Re-run step 5; ensure no Cloudflare
-  Access policy sits in front (that reintroduces the #410 behaviour).
+- **"Connection issue / server configuration issue" with repeated `invalid_token`** —
+  Claude is holding an OAuth token from a *previous* instance of this server (e.g. after
+  moving from systemd to the container, whose OAuth store is a fresh `xmcp-state`
+  volume). Remove+re-add the connector is **not** enough: **fully quit and restart the
+  Claude app**, then re-add the connector so it re-registers.
+- **"Authorization failed" on web/mobile before any login** — the `WWW-Authenticate`
+  header is missing. Re-run step 4; ensure no Cloudflare Access policy fronts `xmcp.*`
+  (that reintroduces #410).
 - **Google login succeeds but Claude is rejected** — your email isn't in
-  `MCP_ALLOWED_GOOGLE_EMAILS`; check `journalctl -u mcp-xmcp` for
-  "Rejected Google login".
-- **"Access blocked: app not verified" / can't reach consent** — add the email as
-  a **test user** on the OAuth consent screen (Testing mode allows only those).
-- **Service won't start, storage errors** — OAuth state writes to
-  `/var/lib/mcp-xmcp` (the system unit's `StateDirectory`, with `FASTMCP_HOME`
-  pointed at it); confirm both are present in the unit.
-- **Real hosts blocked / `grok_x_search` or Google login fail** — the egress proxy
-  is denying a host. Watch `sudo tail -f /var/log/squid/access.log | grep TCP_DENIED`,
-  add the host to `security/egress-proxy/allowlist/x-mcp.txt`, re-run
-  `sudo scripts/install-system.sh` (or `sudo systemctl reload squid`).
-- **Logs:** `journalctl -u mcp-xmcp -f`.
+  `MCP_ALLOWED_GOOGLE_EMAILS`. Check `docker compose logs xmcp` for "Rejected Google login".
+- **"Access blocked: app not verified"** — add the email as a **Test user** on the
+  consent screen (Testing mode allows only those).
+- **A real host is blocked** (Google login / `grok_x_search` fail) — the egress wall is
+  denying it. Watch `docker compose exec egress tail -f /var/log/squid/access.log`
+  (look for `TCP_DENIED`), add the host to `security/egress-proxy/allowlist/x-mcp.txt`,
+  and `docker compose restart egress`.
+- **Logs:** `docker compose logs -f xmcp` (or `guardrail` / `egress` / `cloudflared`).
+
+Hardened home-box (systemd) path instead of containers: see
+[SUBSTRATE.md](SUBSTRATE.md) and `sudo scripts/install-system.sh`.
