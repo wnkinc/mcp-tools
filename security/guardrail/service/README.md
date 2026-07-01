@@ -1,9 +1,8 @@
-# Guardrail service (Layer 4 — detect)
+# Guardrail service
 
-Loopback FastAPI wrapper around **LlamaFirewall** that screens untrusted content
-for prompt-injection before it reaches an agent. Implements the **detect** leg of
-`THREAT-MODEL.md` Layer 4. The other two legs (isolate, gate) are architecture,
-not this service.
+FastAPI wrapper around **LlamaFirewall** that screens untrusted content for
+prompt-injection before it reaches an agent. This service is the **detect** step;
+isolation and human-in-the-loop gating are handled elsewhere.
 
 ```
 POST /scan     {text, role?}  -> {decision: allow|block|human_in_the_loop_required, score, reason, degraded}

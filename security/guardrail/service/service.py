@@ -1,9 +1,8 @@
-"""Layer-4 guardrail service (THREAT-MODEL.md Layer 4, detect leg).
+"""Guardrail service.
 
-A thin loopback FastAPI wrapper around LlamaFirewall. Consumers (the x-search
-wrapper, DeerFlow's guardrail middleware, future untrusted-content tools) POST
-text to /scan and act on the decision. Heavy deps (torch/transformers + the
-gated PromptGuard model) stay isolated in this service's own venv.
+A thin FastAPI wrapper around LlamaFirewall. Consumers POST text to /scan and act on
+the decision. Heavy deps (torch/transformers + the gated PromptGuard model) stay
+isolated in this service's own venv.
 
 Scanners:
   - PROMPT_GUARD  — BERT injection classifier (HF-gated Meta model). Main detector.
@@ -12,7 +11,7 @@ Scanners:
                     before the gated PromptGuard model is available.
 
 AlignmentCheck (AGENT_ALIGNMENT) is intentionally NOT wired here yet — deferred
-pending the Together-vs-Claude vendor decision (see THREAT-MODEL Layer 4).
+pending a vendor decision.
 """
 
 from __future__ import annotations

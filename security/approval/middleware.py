@@ -1,4 +1,4 @@
-"""Out-of-band human-in-the-loop approval for mcp-tools servers (THREAT-MODEL, gate leg).
+"""Out-of-band human-in-the-loop approval for mcp-tools servers.
 
 claude.ai gives us no reliable in-chat gate: tool-approval is sticky (approve once
 and it's approved across every chat; the connector "needs approval" setting stops

@@ -25,7 +25,7 @@ from security.serve import serve  # noqa: E402
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
 
-# THREAT-MODEL L1 (minimize the grant): code-enforced read-only default. The safe
+# Least privilege: code-enforced read-only default. The safe
 # grant lives HERE, in version control -- not solely in a gitignored `.env`. An
 # empty/missing `X_API_TOOL_ALLOWLIST` falls back to exactly these read ops (NOT
 # "expose everything"), so a misconfigured deploy fails closed to read-only instead

@@ -1,1 +1,1 @@
-"""Security layers for mcp-tools (THREAT-MODEL capabilities)."""
+"""Shared security layers for mcp-tools servers."""

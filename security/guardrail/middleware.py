@@ -1,4 +1,4 @@
-"""Shared Layer-4 guardrail screening for mcp-tools servers (THREAT-MODEL L4, detect leg).
+"""Shared guardrail screening for mcp-tools servers.
 
 Ports the SAE DeerFlow `guardrail_interceptor` to a FastMCP **middleware**, since
 mcp-tools servers expose tools to Claude directly (no DeerFlow interceptor hook).
@@ -113,8 +113,8 @@ class GuardrailMiddleware(Middleware):
         if decision == "block":
             LOGGER.warning("guardrail BLOCKED result of %s (score=%s)", tool_name, score)
             return _withhold(
-                f"[guardrail: results WITHHELD -- Layer-4 screen flagged likely "
-                f"prompt-injection in the returned X content (score={score}). Not surfaced.]"
+                f"[guardrail: results WITHHELD -- the screen flagged likely "
+                f"prompt-injection in the returned content (score={score}). Not surfaced.]"
             )
         if decision == "human_in_the_loop_required":
             return _withhold(

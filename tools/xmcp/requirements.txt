@@ -4,7 +4,7 @@
 # 3.4.2 and stripping the per-tool outputSchema in create_mcp() instead, which is
 # what made Claude drop the per-tool approval toggles (anthropics/claude-code#25081).
 #
-# THREAT-MODEL L5 (provenance): ALL direct deps pinned to the OSV-vetted set
+# Provenance: ALL direct deps pinned to the OSV-vetted set
 # (vetted 2026-06-23). A floating dep means "I audited it" expires silently the
 # next time someone reinstalls -- a fresh `pip install -r` must reproduce the
 # audited versions, not latest. Re-vet (OSV + deps.dev) on any version bump.

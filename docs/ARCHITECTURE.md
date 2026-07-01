@@ -42,7 +42,7 @@ The same image runs locally (`docker compose up`) and in the cloud — transport
   egress. The obvious "one endpoint, all tools" alternative is Cloudflare's MCP Portal,
   which is the thing broken by #410.
 
-- **No internet except through the egress allowlist (L2, strongest single control).**
+- **No internet except through the egress allowlist (the strongest single control).**
   Each tool sits on an `internal` Docker network with no gateway, so the squid sidecar
   is its only route off-box; squid enforces a per-tool domain allowlist (default-deny)
   and is the central egress audit log. Verified: a proxy-ignoring connection has no

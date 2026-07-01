@@ -1,6 +1,6 @@
-# Guardrail eval (Layer 4 — verify / Pillar B)
+# Guardrail eval
 
-Red-teams the Layer-4 guardrail so detection is **measured, not assumed** — the
+Red-teams the guardrail so detection is **measured, not assumed** — the
 same "test that it blocks" discipline that validated `srt`.
 
 ## Fast gate (always runnable)
@@ -30,11 +30,11 @@ uv run garak --model_type rest -G <agent-rest-config>.json \
   --probes promptinject,latentinjection,encoding,dan
 ```
 
-Relevant probes for this threat model: `promptinject`, `latentinjection`,
-`agent_breaker`, `encoding`, `dan`, `sysprompt_extraction`.
+Relevant probes: `promptinject`, `latentinjection`, `agent_breaker`, `encoding`,
+`dan`, `sysprompt_extraction`.
 
 ## Where this fits
 
-`THREAT-MODEL.md` Layer 4 is detect → isolate → gate. This harness verifies the
-**detect** leg (the guardrail service). Isolation + HITL gating are architectural
-and verified separately.
+The guardrail is detect → isolate → gate. This harness verifies the **detect** step
+(the guardrail service). Isolation + HITL gating are architectural and verified
+separately.

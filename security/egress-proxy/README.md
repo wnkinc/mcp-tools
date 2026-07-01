@@ -1,9 +1,9 @@
-# Egress proxy (THREAT-MODEL L2 — kill the exfiltration leg)
+# Egress proxy — kill the exfiltration leg
 
 An **allowlist proxy** (squid) that every mcp-tool is forced through, so a tool's
-process can only reach its expected hosts. The threat model's *strongest single
-control*: even a hostile/compromised dependency **cannot exfiltrate** if it can only
-talk where it's supposed to.
+process can only reach its expected hosts — the *strongest single control*: even a
+hostile/compromised dependency **cannot exfiltrate** if it can only talk where it's
+supposed to.
 
 ## How it's enforced (two layers)
 

@@ -1,49 +1,44 @@
 # =================================================================================
-# The local stack: each TOOL as a slim, ML-free container behind an egress wall, plus
-# the GUARDRAIL as its own sidecar carrying the heavy screener. Tools reach the sidecar
-# over the private compose network at http://guardrail:8071; nothing bakes secrets --
-# env is injected here, and the same images run unchanged in the cloud.
+# The local stack: each tool as a slim container behind an egress wall, plus the
+# guardrail as its own sidecar. Secrets come from each tool's .env; the same images
+# run unchanged in the cloud.
 #
-#   docker compose up --build          (secrets come from each tool's .env)
+#   docker compose up --build
 #
-# Security POSTURE is chosen here by env, not in code (serve() reads it at startup):
-# this base file runs auth OFF (local dev) but guardrail ON, to exercise the
-# tool->sidecar screening path. The docker-compose.tunnel.yml overlay is the public
-# deploy (auth on + the Cloudflare ingress).
+# Security posture is chosen by env, not code (serve() reads it at startup): this base
+# file runs auth off (local dev) but the guardrail on. The docker-compose.tunnel.yml
+# overlay is the public deploy (auth on + the Cloudflare ingress).
 # =================================================================================
 services:
-  # --- EGRESS wall (THREAT-MODEL L2): a hard outbound wall. The tool sits on the
-  # `internal` network (no gateway to the internet); this squid sidecar is its only peer
-  # with an `edge` leg, so it is the sole route off-box, enforcing a CONNECT-only domain
-  # allowlist. A dep that ignores HTTPS_PROXY simply has nowhere to dial.
+  # Egress wall: each tool sits on the `internal` network (no gateway to the internet);
+  # this proxy is the only peer with an `edge` leg, so it is the sole route off-box,
+  # enforcing a per-tool CONNECT-only domain allowlist. A dep that ignores the proxy env
+  # has nowhere to dial.
   egress:
-    image: ubuntu/squid@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029  # ubuntu/squid:latest, pin by digest (dependabot bumps)
+    image: ubuntu/squid@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029  # ubuntu/squid:latest, pin by digest
     restart: unless-stopped
     volumes:
       - ./security/egress-proxy/squid.compose.conf:/etc/squid/squid.conf:ro
       - ./security/egress-proxy/allowlist:/etc/squid/allowlist:ro
     networks:
-      - internal   # reachable by the tool as http://egress:3128
+      - internal   # reachable by tools as http://egress:<port>
       - edge       # the only leg with internet -> performs the allowlisted CONNECTs
 
   guardrail:
     build: ./security/guardrail/service
     image: mcp-guardrail
     restart: unless-stopped
-    # No published port: internal to the compose network only -- a true sidecar. Reached
-    # by the tool as http://guardrail:8071. Uncomment to inspect /healthz from the host.
-    # ports: ["8071:8071"]
+    # No published port -- a true sidecar, reached over the network as http://guardrail:8071.
     environment:
       GUARDRAIL_HOST: 0.0.0.0
       GUARDRAIL_PORT: 8071
-      # Supply an HF token + mount the cache below to load the gated PromptGuard model;
-      # otherwise the service comes up DEGRADED (HiddenASCII-only) and says so on /healthz.
+      # Supply a token + mount the cache below to load the gated model; otherwise the
+      # service comes up degraded and says so on /healthz.
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
-      # Persist / supply the PromptGuard model cache across runs (optional).
-      - guardrail-hf-cache:/app/.cache/huggingface
+      - guardrail-hf-cache:/app/.cache/huggingface   # persist / supply the model cache (optional)
     networks:
-      - internal   # internal-only: no external egress (degraded HiddenASCII w/o a model)
+      - internal   # internal-only: no external egress (degraded without a model)
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8071/healthz',timeout=3)"]
       interval: 30s
@@ -51,53 +46,46 @@ services:
       start_period: 90s
       retries: 3
 
+  # This tool screens its output through the guardrail (untrusted external content).
   xmcp:
     build:
-      # Context = repo root so the tool can COPY the shared ./security package.
-      context: .
+      context: .   # repo root, so the image can COPY the shared ./security package
       dockerfile: tools/xmcp/Dockerfile
     image: mcp-xmcp
     restart: unless-stopped
     env_file:
-      - tools/xmcp/.env    # the tool's secrets (X_BEARER_TOKEN, XAI key, Google creds)
-    # No published host port ON PURPOSE: xmcp is on the `internal` network (the egress
-    # wall), and Docker cannot publish a host port from an internal-only container. Ingress
-    # is a substrate's job -- the cloudflared sidecar in docker-compose.tunnel.yml reaches
-    # it at http://xmcp:8061 over the internal network. To poke it locally without the
-    # tunnel: `docker compose exec xmcp ...` or a throwaway container on mcp-tools_internal.
+      - tools/xmcp/.env       # the tool's secrets
+    # No published host port: the tool is on the internal network (the egress wall), which
+    # can't publish one. Ingress is the tunnel's job; to reach it locally use
+    # `docker compose exec` or a container on mcp-tools_internal.
     environment:
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8061
       MCP_TRANSPORT: http
-      # --- security posture for the local deploy (the tunnel overlay flips these on) ---
-      MCP_AUTH_ENABLED: "0"          # local compose: no Cloudflare tunnel / OAuth in front
-      MCP_REQUIRE_APPROVAL: "0"      # out-of-band human approval is a tunnel/Claude concern
-      MCP_UNTRUSTED_OUTPUT: "1"      # screen X content -> promise honored by the sidecar below
+      # Security posture for local dev (the tunnel overlay flips these on). These override
+      # the .env's production values (env beats env_file).
+      MCP_AUTH_ENABLED: "0"
+      MCP_REQUIRE_APPROVAL: "0"
+      MCP_UNTRUSTED_OUTPUT: "1"
       GUARDRAIL_URL: http://guardrail:8071
       GUARDRAIL_ENABLED: "1"
-      # EGRESS: all outbound HTTPS is forced through the squid sidecar (the tool has no
-      # internet of its own on the `internal` network). NO_PROXY keeps sideways/loopback
-      # traffic direct: the guardrail sidecar, localhost, and the Docker embedded DNS.
+      # All outbound HTTPS is forced through the egress proxy; NO_PROXY keeps sideways +
+      # loopback traffic direct (the guardrail, localhost, the Docker resolver).
       HTTPS_PROXY: http://egress:3128
       HTTP_PROXY: http://egress:3128
       NO_PROXY: guardrail,localhost,127.0.0.1
-      # (X_BEARER_TOKEN + XAI_API_KEY come from env_file above; MCP_AUTH_ENABLED: "0" here
-      #  overrides the .env's production "1" so the local deploy stays auth-off.)
     volumes:
-      # Writable state (FASTMCP_HOME): OAuth client registrations + tokens when auth is on.
-      - xmcp-state:/app/state
+      - xmcp-state:/app/state   # writable state (OAuth registrations + tokens when auth is on)
     networks:
-      - internal   # internal-only: no direct internet; egress via the squid sidecar
+      - internal
     depends_on:
       guardrail:
-        condition: service_healthy   # tool waits until the screener is actually ready
+        condition: service_healthy   # wait for the screener before starting
       egress:
-        condition: service_started   # ...and until the egress proxy is up
+        condition: service_started
 
-  # --- TRUSTED tools: same image shape as xmcp, but no guardrail leg (they don't return
-  # untrusted external content). Each points HTTPS_PROXY at its OWN egress listener, so it
-  # can only reach its own allowlist. Auth is off for the local deploy; the tunnel overlay
-  # flips it on. Secrets come from each tool's .env (loaded below). ---
+  # Trusted tools: same shape, no guardrail leg. Each points at its OWN egress listener,
+  # so it can only reach its own allowlist. Posture is local dev here; the overlay flips it.
   quant:
     build:
       context: .
@@ -109,7 +97,7 @@ services:
     environment:
       MCP_HOST: 0.0.0.0
       MCP_TRANSPORT: http
-      MCP_AUTH_ENABLED: "0"    # overrides the .env's prod "1" for the local deploy
+      MCP_AUTH_ENABLED: "0"
       HTTPS_PROXY: http://egress:3130
       HTTP_PROXY: http://egress:3130
       NO_PROXY: localhost,127.0.0.1
@@ -128,11 +116,11 @@ services:
     image: mcp-data
     restart: unless-stopped
     env_file:
-      - tools/data/.env    # TIINGO/DATABENTO provider keys + Google creds
+      - tools/data/.env
     environment:
       MCP_HOST: 0.0.0.0
       MCP_TRANSPORT: http
-      MCP_AUTH_ENABLED: "0"    # overrides the .env's prod "1" for the local deploy
+      MCP_AUTH_ENABLED: "0"
       HTTPS_PROXY: http://egress:3129
       HTTP_PROXY: http://egress:3129
       NO_PROXY: localhost,127.0.0.1
@@ -145,8 +133,8 @@ services:
         condition: service_started
 
 networks:
-  # No gateway to the host/internet: containers here can only reach each other + any
-  # peer that also has an `edge` leg (the egress proxy). This is the wall.
+  # No gateway to the host/internet: containers here reach only each other + any peer
+  # that also has an `edge` leg (the egress proxy). This is the wall.
   internal:
     internal: true
   edge: {}

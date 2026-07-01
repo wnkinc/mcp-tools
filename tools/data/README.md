@@ -96,7 +96,7 @@ in `security/egress-proxy/allowlist/data.txt` and add a route in
 
 ## Egress
 
-Behind the L2 egress wall, allowed hosts live in `security/egress-proxy/allowlist/data.txt`:
+Behind the egress wall, allowed hosts live in `security/egress-proxy/allowlist/data.txt`:
 `api.tiingo.com` (default data), `hist.databento.com` (only when `source="databento"`), + the
 Google OAuth hosts (token/JWKS when `MCP_AUTH_ENABLED=1`). Yahoo hosts remain for the
 still-installed `openbb-yfinance`. OpenBB does no network at import. Find misses via

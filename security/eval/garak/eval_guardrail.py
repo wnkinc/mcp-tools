@@ -1,4 +1,4 @@
-"""Layer-4 verification harness (THREAT-MODEL Pillar B).
+"""Guardrail verification harness.
 
 Red-teams the guardrail service (:8071) with a labelled payload set and reports:
   - detection rate (TPR) on injection payloads  -> should be HIGH

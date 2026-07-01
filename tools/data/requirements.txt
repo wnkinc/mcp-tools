@@ -1,4 +1,4 @@
-# THREAT-MODEL L5 (provenance): pin ALL deps so a fresh `pip install -r` reproduces a
+# Provenance: pin ALL deps so a fresh `pip install -r` reproduces a
 # known set, not latest -- a floating dep silently un-audits itself on reinstall.
 # Versions below = the currently-installed set; OSV/deps.dev vetting is still TODO
 # (the deferred dep-vetting pipeline). Re-vet on any version bump.
