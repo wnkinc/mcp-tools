@@ -11,6 +11,20 @@
 # tool->sidecar screening path. A public deploy would flip MCP_AUTH_ENABLED on.
 # =================================================================================
 services:
+  # --- EGRESS wall (THREAT-MODEL L2): the container idiom for the systemd
+  # IPAddressDeny=any + HTTPS_PROXY combo. The tool sits on the `internal` network
+  # (no gateway to the internet); this squid sidecar is its only peer with an `edge`
+  # leg, so it is the sole route off-box, enforcing a CONNECT-only domain allowlist.
+  egress:
+    image: ubuntu/squid:latest   # TODO pin by digest (dependabot)
+    restart: unless-stopped
+    volumes:
+      - ./security/egress-proxy/squid.compose.conf:/etc/squid/squid.conf:ro
+      - ./security/egress-proxy/allowlist:/etc/squid/allowlist:ro
+    networks:
+      - internal   # reachable by the tool as http://egress:3128
+      - edge       # the only leg with internet -> performs the allowlisted CONNECTs
+
   guardrail:
     build: ./security/guardrail/service
     image: mcp-guardrail
@@ -26,6 +40,8 @@ services:
     volumes:
       # Persist / supply the PromptGuard model cache across runs (optional).
       - guardrail-hf-cache:/app/.cache/huggingface
+    networks:
+      - internal   # internal-only: no external egress (degraded HiddenASCII w/o a model)
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8071/healthz',timeout=3)"]
       interval: 30s
@@ -53,14 +69,31 @@ services:
       MCP_UNTRUSTED_OUTPUT: "1"      # screen X content -> promise honored by the sidecar below
       GUARDRAIL_URL: http://guardrail:8071
       GUARDRAIL_ENABLED: "1"
+      # EGRESS: all outbound HTTPS is forced through the squid sidecar (the tool has no
+      # internet of its own on the `internal` network). NO_PROXY keeps sideways/loopback
+      # traffic direct: the guardrail sidecar, localhost, and the Docker embedded DNS.
+      HTTPS_PROXY: http://egress:3128
+      HTTP_PROXY: http://egress:3128
+      NO_PROXY: guardrail,localhost,127.0.0.1
       # x-mcp needs its read-only app bearer to fetch X's OpenAPI spec + data.
       X_BEARER_TOKEN: ${X_BEARER_TOKEN:?set X_BEARER_TOKEN in your shell or a .env file}
     volumes:
       # Writable state (FASTMCP_HOME): OAuth client registrations + tokens when auth is on.
       - xmcp-state:/app/state
+    networks:
+      - internal   # internal-only: no direct internet; egress via the squid sidecar
     depends_on:
       guardrail:
         condition: service_healthy   # tool waits until the screener is actually ready
+      egress:
+        condition: service_started   # ...and until the egress proxy is up
+
+networks:
+  # No gateway to the host/internet: containers here can only reach each other + any
+  # peer that also has an `edge` leg (the egress proxy). This is the wall.
+  internal:
+    internal: true
+  edge: {}
 
 volumes:
   guardrail-hf-cache:
