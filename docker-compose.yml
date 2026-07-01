@@ -4,7 +4,7 @@
 # over the private compose network at http://guardrail:8071; nothing bakes secrets --
 # env is injected here, and the same images run unchanged in the cloud.
 #
-#   X_BEARER_TOKEN=... docker compose up --build
+#   docker compose up --build          (secrets come from each tool's .env)
 #
 # Security POSTURE is chosen here by env, not in code (serve() reads it at startup):
 # this base file runs auth OFF (local dev) but guardrail ON, to exercise the
@@ -58,6 +58,8 @@ services:
       dockerfile: tools/xmcp/Dockerfile
     image: mcp-xmcp
     restart: unless-stopped
+    env_file:
+      - tools/xmcp/.env    # the tool's secrets (X_BEARER_TOKEN, XAI key, Google creds)
     # No published host port ON PURPOSE: xmcp is on the `internal` network (the egress
     # wall), and Docker cannot publish a host port from an internal-only container. Ingress
     # is a substrate's job -- the cloudflared sidecar in docker-compose.tunnel.yml reaches
@@ -79,8 +81,8 @@ services:
       HTTPS_PROXY: http://egress:3128
       HTTP_PROXY: http://egress:3128
       NO_PROXY: guardrail,localhost,127.0.0.1
-      # x-mcp needs its read-only app bearer to fetch X's OpenAPI spec + data.
-      X_BEARER_TOKEN: ${X_BEARER_TOKEN:?set X_BEARER_TOKEN in your shell or a .env file}
+      # (X_BEARER_TOKEN + XAI_API_KEY come from env_file above; MCP_AUTH_ENABLED: "0" here
+      #  overrides the .env's production "1" so the local deploy stays auth-off.)
     volumes:
       # Writable state (FASTMCP_HOME): OAuth client registrations + tokens when auth is on.
       - xmcp-state:/app/state
@@ -94,18 +96,20 @@ services:
 
   # --- TRUSTED tools: same image shape as xmcp, but no guardrail leg (they don't return
   # untrusted external content). Each points HTTPS_PROXY at its OWN egress listener, so it
-  # can only reach its own allowlist. Auth is off for the local demo; the tunnel overlay
-  # flips it on. They boot without secrets (no startup network fetch). ---
+  # can only reach its own allowlist. Auth is off for the local deploy; the tunnel overlay
+  # flips it on. Secrets come from each tool's .env (loaded below). ---
   quant:
     build:
       context: .
       dockerfile: tools/quant/Dockerfile
     image: mcp-quant
     restart: unless-stopped
+    env_file:
+      - tools/quant/.env
     environment:
       MCP_HOST: 0.0.0.0
       MCP_TRANSPORT: http
-      MCP_AUTH_ENABLED: "0"
+      MCP_AUTH_ENABLED: "0"    # overrides the .env's prod "1" for the local deploy
       HTTPS_PROXY: http://egress:3130
       HTTP_PROXY: http://egress:3130
       NO_PROXY: localhost,127.0.0.1
@@ -123,10 +127,12 @@ services:
       dockerfile: tools/data/Dockerfile
     image: mcp-data
     restart: unless-stopped
+    env_file:
+      - tools/data/.env    # TIINGO/DATABENTO provider keys + Google creds
     environment:
       MCP_HOST: 0.0.0.0
       MCP_TRANSPORT: http
-      MCP_AUTH_ENABLED: "0"
+      MCP_AUTH_ENABLED: "0"    # overrides the .env's prod "1" for the local deploy
       HTTPS_PROXY: http://egress:3129
       HTTP_PROXY: http://egress:3129
       NO_PROXY: localhost,127.0.0.1

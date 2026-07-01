@@ -42,9 +42,10 @@ Confirm the route for this host in `security/ingress/cloudflared.config.yml`
 
 ## 3. Bring up the public stack
 
-Only one connector may run for a tunnel — stop any existing host `cloudflared` first:
+Secrets come from each tool's `.env` (loaded by the base). Only one connector may run
+for a tunnel — stop any existing host `cloudflared` first:
 ```bash
-X_BEARER_TOKEN=... docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
 ```
 This starts the tools + guardrail + egress wall + the Cloudflare ingress, with auth
 **on** (the overlay). Watch it:
@@ -52,7 +53,7 @@ This starts the tools + guardrail + egress wall + the Cloudflare ingress, with a
 docker compose ps
 docker compose logs -f xmcp        # expect: "OAuth enabled (Google) at https://xmcp..."
 ```
-(Local, auth-off dev instead: `X_BEARER_TOKEN=... docker compose up --build`.)
+(Local, auth-off dev instead: `docker compose up --build`.)
 
 ## 4. Verify the public endpoint (the #410 check)
 

@@ -3,9 +3,10 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
 #
-# The base file is the local demo (auth off, host port published). This overlay makes it
-# the public deploy: OAuth + approval + guardrail all ON, ingress via the tunnel. Same
-# images, different substrate -- the whole difference is env + which sidecars run.
+# The base file is the local deploy (auth off, no ingress). This overlay makes it the
+# public deploy: OAuth + approval + guardrail all ON, ingress via the tunnel. Same images
+# and .env files (loaded by the base) -- the whole difference is the posture env + the
+# cloudflared sidecar.
 services:
   cloudflared:
     image: cloudflare/cloudflared@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283  # cloudflare/cloudflared:latest, pin by digest
@@ -24,26 +25,19 @@ services:
       xmcp:
         condition: service_healthy
 
+  # The tools' .env files (Google OAuth client, allowed emails, bearer/provider keys) are
+  # already loaded by the base; this overlay only flips the posture on.
   xmcp:
-    # Bring the tool's real secrets (Google OAuth client, allowed emails, bearer) from
-    # its .env; the explicit posture below overrides the base file's local-demo "off".
-    env_file:
-      - tools/xmcp/.env
     environment:
       MCP_AUTH_ENABLED: "1"       # public: Google OAuth on (overrides base "0")
       MCP_REQUIRE_APPROVAL: "1"   # out-of-band human approval on
       MCP_UNTRUSTED_OUTPUT: "1"   # guardrail screening on
 
-  # Trusted tools: public posture is just OAuth on (no approval/guardrail). Their .env
-  # carries the Google client + allowed emails (+ data's provider API keys).
+  # Trusted tools: public posture is just OAuth on (no approval/guardrail).
   quant:
-    env_file:
-      - tools/quant/.env
     environment:
       MCP_AUTH_ENABLED: "1"
 
   data:
-    env_file:
-      - tools/data/.env
     environment:
       MCP_AUTH_ENABLED: "1"

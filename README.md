@@ -41,8 +41,8 @@ mcp-tools/
 ## Quick start
 
 ```
-X_BEARER_TOKEN=... docker compose up --build                                   # local (auth off)
-docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d        # public (auth on)
+docker compose up --build                                               # local (auth off)
+docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d  # public (auth on)
 ```
 
 New tool: `scripts/new-tool.sh`. How it fits together:
