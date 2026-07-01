@@ -17,15 +17,14 @@ tunnel: fc5d8823-096f-4079-bb32-fcc372d725a1
 credentials-file: /etc/cloudflared/creds.json
 
 ingress:
-  # x-mcp: the MCP server does its OWN Google OAuth (no Cloudflare Access policy here).
+  # Each MCP server does its OWN Google OAuth (no Cloudflare Access policy here). Routes
+  # target the compose service names over the internal network.
   - hostname: xmcp.secure-agentic-engineering.com
     service: http://xmcp:8061
-
-  # When data/quant join the compose stack, add their routes here:
-  #   - hostname: data.secure-agentic-engineering.com
-  #     service: http://data:8062
-  #   - hostname: quant.secure-agentic-engineering.com
-  #     service: http://quant:8064
+  - hostname: data.secure-agentic-engineering.com
+    service: http://data:8062
+  - hostname: quant.secure-agentic-engineering.com
+    service: http://quant:8064
 
   # Everything else is refused.
   - service: http_status:404

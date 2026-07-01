@@ -89,6 +89,50 @@ services:
       egress:
         condition: service_started   # ...and until the egress proxy is up
 
+  # --- TRUSTED tools: same image shape as xmcp, but no guardrail leg (they don't return
+  # untrusted external content). Each points HTTPS_PROXY at its OWN egress listener, so it
+  # can only reach its own allowlist. Auth is off for the local demo; the tunnel overlay
+  # flips it on. They boot without secrets (no startup network fetch). ---
+  quant:
+    build:
+      context: .
+      dockerfile: tools/quant/Dockerfile
+    image: mcp-quant
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: http
+      MCP_AUTH_ENABLED: "0"
+      HTTPS_PROXY: http://egress:3130
+      HTTP_PROXY: http://egress:3130
+      NO_PROXY: localhost,127.0.0.1
+    volumes:
+      - quant-state:/app/state
+    networks:
+      - internal
+    depends_on:
+      egress:
+        condition: service_started
+
+  data:
+    build:
+      context: .
+      dockerfile: tools/data/Dockerfile
+    image: mcp-data
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: http
+      MCP_AUTH_ENABLED: "0"
+      HTTPS_PROXY: http://egress:3129
+      HTTP_PROXY: http://egress:3129
+      NO_PROXY: localhost,127.0.0.1
+    volumes:
+      - data-state:/app/state
+    networks:
+      - internal
+    depends_on:
+      egress:
+        condition: service_started
+
 networks:
   # No gateway to the host/internet: containers here can only reach each other + any
   # peer that also has an `edge` leg (the egress proxy). This is the wall.
@@ -99,3 +143,5 @@ networks:
 volumes:
   guardrail-hf-cache:
   xmcp-state:
+  quant-state:
+  data-state:

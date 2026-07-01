@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+# Portable substrate for the data TOOL (see docs/SUBSTRATE.md). Same shape as
+# tools/xmcp/Dockerfile; data is a TRUSTED tool. BUILD CONTEXT = repo root:
+#   docker build -f tools/data/Dockerfile -t mcp-data .
+ARG BASE=public.ecr.aws/amazonlinux/amazonlinux@sha256:a450a74bfebfa936e7106d79c8b4b4dd0ca891c790513f84624da02a0e5531db
+
+# --- builder: resolve the venv from the hashed lock, then PREBUILD OpenBB ------------
+FROM ${BASE} AS builder
+RUN dnf install -y python3.12 python3.12-pip python3.12-devel gcc gcc-c++ && dnf clean all
+WORKDIR /app
+COPY tools/data/requirements.lock ./requirements.lock
+RUN python3.12 -m venv /app/.venv \
+    && /app/.venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /app/.venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
+# OpenBB assembles a static package on first import; do it now (build time, writable
+# site-packages) so runtime can set OPENBB_AUTO_BUILD=false on a read-only rootfs.
+RUN OPENBB_AUTO_BUILD=true /app/.venv/bin/python -c "import openbb; openbb.obb; print('openbb prebuilt')"
+
+# --- runtime: slim, non-root ---------------------------------------------------------
+FROM ${BASE}
+RUN dnf install -y python3.12 procps-ng shadow-utils && dnf clean all \
+    && groupadd --system app && useradd --system --gid app --home-dir /app app
+WORKDIR /app
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    MCP_HOST=0.0.0.0 \
+    MCP_PORT=8062 \
+    MCP_TRANSPORT=http \
+    # Writable state carve-out. HOME points here so OpenBB's ~/.openbb_platform settings
+    # + FastMCP OAuth state land on a writable path; DATA_ROOT is the parquet lake.
+    HOME=/app/state \
+    FASTMCP_HOME=/app/state \
+    DATA_ROOT=/app/state/data \
+    # Prebuilt above -> never rebuild at runtime (rootfs is read-only to the app user).
+    OPENBB_AUTO_BUILD=false
+
+COPY --from=builder /app/.venv /app/.venv
+COPY security/ /app/security/
+COPY tools/data/ /app/tools/data/
+RUN mkdir -p /app/state/data && chown -R app:app /app/state
+
+USER app
+WORKDIR /app/tools/data
+EXPOSE 8062
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import os,socket; socket.create_connection(('127.0.0.1', int(os.environ.get('MCP_PORT','8062'))), timeout=3).close()" || exit 1
+ENTRYPOINT ["python", "server.py"]

@@ -11,6 +11,9 @@ services:
     image: cloudflare/cloudflared@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283  # cloudflare/cloudflared:latest, pin by digest
     command: tunnel --config /etc/cloudflared/config.yml run
     restart: unless-stopped
+    # Run as the creds file's owner so it can read the 0400 secret (the image default
+    # user 65532 can't). Override if your staged creds.json is owned by another uid.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     volumes:
       - ./security/ingress/cloudflared.config.yml:/etc/cloudflared/config.yml:ro
       - ./security/ingress/secrets/creds.json:/etc/cloudflared/creds.json:ro
@@ -30,3 +33,17 @@ services:
       MCP_AUTH_ENABLED: "1"       # public: Google OAuth on (overrides base "0")
       MCP_REQUIRE_APPROVAL: "1"   # out-of-band human approval on
       MCP_UNTRUSTED_OUTPUT: "1"   # guardrail screening on
+
+  # Trusted tools: public posture is just OAuth on (no approval/guardrail). Their .env
+  # carries the Google client + allowed emails (+ data's provider API keys).
+  quant:
+    env_file:
+      - tools/quant/.env
+    environment:
+      MCP_AUTH_ENABLED: "1"
+
+  data:
+    env_file:
+      - tools/data/.env
+    environment:
+      MCP_AUTH_ENABLED: "1"
