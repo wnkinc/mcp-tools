@@ -1,0 +1,21 @@
+# Build context is the repo root (tools import shared ./security). Keep the context
+# small and never ship secrets or host-built venvs into an image.
+**/.venv
+**/__pycache__
+**/*.pyc
+.git
+.gitignore
+.ruff_cache
+.pytest_cache
+vendor/
+docs/
+scripts/
+fuckme.md
+
+# Secrets & host state -- env is injected by the substrate (compose / task def), never baked.
+**/.env
+**/*.env
+!**/env.example
+
+# Per-tool systemd units are the OTHER (hardened-host) substrate; not needed in the image.
+**/systemd/

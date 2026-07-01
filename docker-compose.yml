@@ -1,0 +1,61 @@
+# =================================================================================
+# The "two substrates" picture (docs/SUBSTRATE.md): the x-mcp TOOL as a slim,
+# ML-free container + the GUARDRAIL as its own sidecar carrying the heavy screener.
+# The tool reaches the sidecar over the private compose network at http://guardrail:8071;
+# neither bakes secrets -- env is injected here, the same image runs unchanged in cloud.
+#
+#   X_BEARER_TOKEN=... docker compose up --build
+#
+# Security POSTURE is chosen here by env, not in code (serve() reads it at startup):
+# this local compose runs auth OFF (no tunnel/OAuth) but guardrail ON, to exercise the
+# tool->sidecar screening path. A public deploy would flip MCP_AUTH_ENABLED on.
+# =================================================================================
+services:
+  guardrail:
+    build: ./security/guardrail/service
+    image: mcp-guardrail
+    # No published port: internal to the compose network only -- a true sidecar. Reached
+    # by the tool as http://guardrail:8071. Uncomment to inspect /healthz from the host.
+    # ports: ["8071:8071"]
+    environment:
+      GUARDRAIL_HOST: 0.0.0.0
+      GUARDRAIL_PORT: 8071
+      # Supply an HF token + mount the cache below to load the gated PromptGuard model;
+      # otherwise the service comes up DEGRADED (HiddenASCII-only) and says so on /healthz.
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      # Persist / supply the PromptGuard model cache across runs (optional).
+      - guardrail-hf-cache:/app/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8071/healthz',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+
+  xmcp:
+    build:
+      # Context = repo root so the tool can COPY the shared ./security package.
+      context: .
+      dockerfile: tools/xmcp/Dockerfile
+    image: mcp-xmcp
+    ports:
+      - "8061:8061"  # MCP HTTP transport exposed to the host / Claude connector
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8061
+      MCP_TRANSPORT: http
+      # --- security posture for THIS substrate (see the table in docs/SUBSTRATE.md) ---
+      MCP_AUTH_ENABLED: "0"          # local compose: no Cloudflare tunnel / OAuth in front
+      MCP_REQUIRE_APPROVAL: "0"      # out-of-band human approval is a tunnel/Claude concern
+      MCP_UNTRUSTED_OUTPUT: "1"      # screen X content -> promise honored by the sidecar below
+      GUARDRAIL_URL: http://guardrail:8071
+      GUARDRAIL_ENABLED: "1"
+      # x-mcp needs its read-only app bearer to fetch X's OpenAPI spec + data.
+      X_BEARER_TOKEN: ${X_BEARER_TOKEN:?set X_BEARER_TOKEN in your shell or a .env file}
+    depends_on:
+      guardrail:
+        condition: service_healthy   # tool waits until the screener is actually ready
+
+volumes:
+  guardrail-hf-cache:

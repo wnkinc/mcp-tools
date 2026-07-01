@@ -113,7 +113,13 @@ def scan(req: ScanRequest) -> ScanResponse:
 def main() -> None:
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("GUARDRAIL_PORT", "8071")))
+    # Default loopback keeps the systemd unit unchanged; a container sidecar sets
+    # GUARDRAIL_HOST=0.0.0.0 so the tool container can reach it over the compose network.
+    uvicorn.run(
+        app,
+        host=os.environ.get("GUARDRAIL_HOST", "127.0.0.1"),
+        port=int(os.environ.get("GUARDRAIL_PORT", "8071")),
+    )
 
 
 if __name__ == "__main__":
