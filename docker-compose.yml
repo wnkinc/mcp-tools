@@ -40,7 +40,9 @@ services:
       dockerfile: tools/xmcp/Dockerfile
     image: mcp-xmcp
     ports:
-      - "8061:8061"  # MCP HTTP transport exposed to the host / Claude connector
+      # Host port is overridable so the container can run alongside the live systemd
+      # mcp-xmcp (which already holds 8061): XMCP_HOST_PORT=18061 docker compose up
+      - "${XMCP_HOST_PORT:-8061}:8061"
     environment:
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8061
