@@ -15,7 +15,8 @@ services:
   # enforcing a per-tool CONNECT-only domain allowlist. A dep that ignores the proxy env
   # has nowhere to dial.
   egress:
-    image: ubuntu/squid@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029  # ubuntu/squid:latest, pin by digest
+    build: ./security/egress-proxy   # pinned ubuntu/squid + Ubuntu security updates
+    image: mcp-egress
     restart: unless-stopped
     volumes:
       - ./security/egress-proxy/squid.compose.conf:/etc/squid/squid.conf:ro

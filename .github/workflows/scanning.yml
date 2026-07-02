@@ -1,0 +1,59 @@
+name: scanning
+
+# The lockfiles and base-image digests freeze dependencies in time; CVEs are
+# discovered later. This re-checks the frozen world weekly (and lock changes on PR).
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tools/*/requirements.lock"
+      - ".github/workflows/scanning.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit
+      - name: audit lockfiles
+        run: |
+          for lock in tools/*/requirements.lock; do
+            echo "::group::$lock"
+            pip-audit --no-deps -r "$lock"
+            echo "::endgroup::"
+          done
+
+  trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: install trivy
+        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+      - name: scan pinned base images
+        # Digests are read from the repo so a re-pin is picked up automatically.
+        # Excluded from the raw-digest scan: quantconnect/lean (13GB exceeds the
+        # runner; scan locally when re-pinning) and ubuntu/squid (its base is
+        # expected-red -- the egress Dockerfile exists to patch it; the built image
+        # is scanned in the next step instead).
+        run: |
+          refs=$(grep -rhoE '[a-z0-9./_-]+@sha256:[a-f0-9]{64}' \
+              tools/*/Dockerfile security/guardrail/service/Dockerfile docker-compose*.yml \
+            | sort -u | grep -vE 'quantconnect|ubuntu/squid')
+          echo "scanning:"; echo "$refs"
+          for ref in $refs; do
+            trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$ref"
+          done
+      - name: scan patched egress image
+        # The one image whose Dockerfile applies security updates on top of its
+        # pinned base: build it and scan the result (what actually runs).
+        run: |
+          docker build -q -t mcp-egress security/egress-proxy
+          trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 mcp-egress

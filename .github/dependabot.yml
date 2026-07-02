@@ -1,0 +1,20 @@
+# Security-only posture: no routine version-churn PRs. Vulnerable pins still get
+# Dependabot security-update PRs (enabled in repo settings), which CI then gates --
+# the pytest jobs install the locks in --require-hashes mode, so a mangled lock
+# can't merge. Human review/merge is the vet->approve step; nothing auto-merges.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directories:
+      - /tools/xmcp
+      - /tools/data
+      - /tools/lean
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0 # version updates off; security updates unaffected
+
+  # Actions age out (node-runtime deprecations, majors); monthly is churn enough.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

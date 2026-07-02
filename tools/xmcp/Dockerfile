@@ -12,7 +12,7 @@
 
 # Base pinned by digest (Amazon Linux 2023), mirroring the awslabs example. Dependabot
 # should bump this hash.
-ARG BASE=public.ecr.aws/amazonlinux/amazonlinux@sha256:a450a74bfebfa936e7106d79c8b4b4dd0ca891c790513f84624da02a0e5531db
+ARG BASE=public.ecr.aws/amazonlinux/amazonlinux@sha256:336b735f8f0aa1d591802beb01d2ef85c6a4a3f411ea4ffa35cad8ba5db282af
 
 # --- builder: resolve the venv from the hashed lock (tamper-evident install) ---------
 FROM ${BASE} AS builder
