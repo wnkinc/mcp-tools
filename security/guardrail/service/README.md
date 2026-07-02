@@ -50,8 +50,23 @@ docker compose up -d guardrail
 docker compose logs -f guardrail    # PromptGuard load / scans
 ```
 
-Supply the gated PromptGuard model by setting `HF_TOKEN` and mounting the HF cache
-(see the `guardrail` service in `docker-compose.yml`); otherwise it runs degraded.
+**Supplying the gated PromptGuard model:** the sidecar has **no egress**, so it can
+never download the model itself — populate its cache volume once, out-of-band, from a
+throwaway container that does have network (needs `HF_TOKEN` with read access and the
+model license accepted on its HF page; until then the service runs degraded):
+
+```bash
+export HF_TOKEN=hf_...   # or source it from the root .env
+docker run --rm --entrypoint python -e HF_TOKEN -e HF_HOME=/tmp/hfdl \
+  -v mcp-tools_guardrail-hf-cache:/app/.cache/huggingface mcp-guardrail -c "
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+name = 'meta-llama/Llama-Prompt-Guard-2-86M'   # the model llamafirewall expects
+m = AutoModelForSequenceClassification.from_pretrained(name)
+t = AutoTokenizer.from_pretrained(name)
+p = '/app/.cache/huggingface/' + name.replace('/', '--')
+m.save_pretrained(p); t.save_pretrained(p)"
+docker restart mcp-tools-guardrail-1   # then /healthz shows prompt_guard_loaded: true
+```
 
 ## Consumers
 
