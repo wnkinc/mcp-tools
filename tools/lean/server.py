@@ -61,6 +61,9 @@ def _build_config(job: Path, backtest_id: str, class_name: str) -> dict:
         "data-folder": DATA_FOLDER,
         "results-destination-folder": str(job),
         "object-store-root": str(job / "storage"),
+        # AlgorithmImports (and friends) live in the launcher bin; with cwd=job they
+        # must be put on the embedded interpreter's path explicitly.
+        "python-additional-paths": [str(LAUNCHER_DIR)],
         "debugging": False,
         "show-missing-data-logs": True,
         "log-handler": "QuantConnect.Logging.CompositeLogHandler",
@@ -133,13 +136,20 @@ def backtest(
     (job / "config.json").write_text(json.dumps(config, indent=2))
 
     timeout = max(30, min(timeout_seconds, MAX_RUN_SECONDS))
+    # The engine must NOT see this wrapper's venv on PATH: pythonnet resolves the
+    # embedded interpreter's prefix from the first `python` found there, and the
+    # venv's empty site-packages then shadows the engine's miniconda (pandas etc.).
+    env = {**os.environ, "PATH": os.pathsep.join(
+        p for p in os.environ["PATH"].split(os.pathsep)
+        if p != str(Path(sys.prefix) / "bin")
+    )}
     console = job / "console.log"
     try:
         with console.open("w") as out:
             proc = subprocess.run(
                 ["dotnet", str(LAUNCHER_DIR / "QuantConnect.Lean.Launcher.dll"),
                  "--config", str(job / "config.json")],
-                cwd=job, stdout=out, stderr=subprocess.STDOUT, timeout=timeout,
+                cwd=job, env=env, stdout=out, stderr=subprocess.STDOUT, timeout=timeout,
             )
     except subprocess.TimeoutExpired:
         return {
@@ -187,8 +197,11 @@ def backtest_result(backtest_id: str) -> dict:
 
     data = json.loads(result_file.read_text())
     total = data.get("totalPerformance") or {}
-    return {
-        "status": "completed",
+    state = data.get("state", {})
+    out = {
+        # The engine's own verdict (Completed / RuntimeError / ...): it writes
+        # results JSONs even for failed runs.
+        "status": state.get("Status", "unknown"),
         "id": backtest_id,
         "statistics": data.get("statistics", {}),
         "runtime_statistics": data.get("runtimeStatistics", {}),
@@ -196,6 +209,22 @@ def backtest_result(backtest_id: str) -> dict:
         "portfolio_statistics": total.get("portfolioStatistics", {}),
         "orders": list(data.get("orders", {}).values()),
     }
+    if state.get("RuntimeError"):
+        out["runtime_error"] = state["RuntimeError"]
+    return out
+
+
+def _engine_status(job: Path) -> str:
+    """The engine's own verdict from the small <id>-summary.json it writes per run
+    (state.Status: Completed / RuntimeError / ...); it writes results JSONs even
+    for failed runs, so file existence alone can't tell success from failure."""
+    summary = job / f"{job.name}-summary.json"
+    if not summary.exists():
+        return "no_result"
+    try:
+        return json.loads(summary.read_text()).get("state", {}).get("Status", "unknown")
+    except (OSError, json.JSONDecodeError):
+        return "unknown"
 
 
 @mcp.tool
@@ -204,11 +233,7 @@ def list_backtests(project: str = "") -> list[dict]:
     derived from the run folders; the id embeds the run's timestamp and name."""
     pattern = _SLUG_RE.sub("-", project).strip("-").lower() or "*"
     runs = [
-        {
-            "id": job.name,
-            "project": job.parent.name,
-            "completed": (job / f"{job.name}.json").exists(),
-        }
+        {"id": job.name, "project": job.parent.name, "status": _engine_status(job)}
         for job in BACKTESTS.glob(f"{pattern}/*")
         if job.is_dir()
     ]
