@@ -1,7 +1,0 @@
-# quant egress allowlist (squid dstdomain). One host per line; leading dot = subdomains.
-# Quant tool (research library + backtest engines): math/deps installed at build time.
-# Only the Google OAuth hosts are needed to serve Claude:
-accounts.google.com
-oauth2.googleapis.com
-www.googleapis.com
-openidconnect.googleapis.com

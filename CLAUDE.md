@@ -14,7 +14,6 @@ security/                  # shared plumbing, imported by every tool
 tools/                     # one tool per dir: server.py + Dockerfile + requirements.lock
   xmcp/                    #   X read-only search/lookup + Grok x_search (:8061)
   data/                    #   market data via OpenBB -> parquet lake (:8062)
-  quant/                   #   research library (Hamilton DAG) + backtest engines (:8064)
 scripts/new-tool.sh        # stamp a new tool
 docs/                      # SETUP.md, ARCHITECTURE.md (how it fits together)
 ```

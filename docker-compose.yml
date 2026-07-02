@@ -84,31 +84,8 @@ services:
       egress:
         condition: service_started
 
-  # Trusted tools: same shape, no guardrail leg. Each points at its OWN egress listener,
+  # Trusted tool: same shape, no guardrail leg. Points at its OWN egress listener,
   # so it can only reach its own allowlist. Posture is local dev here; the overlay flips it.
-  quant:
-    build:
-      context: .
-      dockerfile: tools/quant/Dockerfile
-    image: mcp-quant
-    restart: unless-stopped
-    env_file:
-      - tools/quant/.env
-    environment:
-      MCP_HOST: 0.0.0.0
-      MCP_TRANSPORT: http
-      MCP_AUTH_ENABLED: "0"
-      HTTPS_PROXY: http://egress:3130
-      HTTP_PROXY: http://egress:3130
-      NO_PROXY: localhost,127.0.0.1
-    volumes:
-      - quant-state:/app/state
-    networks:
-      - internal
-    depends_on:
-      egress:
-        condition: service_started
-
   data:
     build:
       context: .
@@ -142,5 +119,4 @@ networks:
 volumes:
   guardrail-hf-cache:
   xmcp-state:
-  quant-state:
   data-state:

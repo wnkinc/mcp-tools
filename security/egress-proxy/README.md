@@ -21,7 +21,7 @@ xmcp (internal net, no gateway) ──HTTPS_PROXY──▶ egress:3128 ──all
 
 ## Files
 - `squid.compose.conf` — the sidecar's config: per-tool listeners (`3128` x-mcp /
-  `3129` data / `3130` quant), default-deny. Mounted read-only into the `egress` service.
+  `3129` data), default-deny. Mounted read-only into the `egress` service.
 - `allowlist/<tool>.txt` — that tool's allowed domains, mounted at `/etc/squid/allowlist/`.
 
 ## Adding a tool

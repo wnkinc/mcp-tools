@@ -30,10 +30,6 @@ services:
       MCP_REQUIRE_APPROVAL: "1"
       MCP_UNTRUSTED_OUTPUT: "1"
 
-  quant:
-    environment:
-      MCP_AUTH_ENABLED: "1"
-
   data:
     environment:
       MCP_AUTH_ENABLED: "1"
