@@ -17,6 +17,8 @@ Tools exposed:
   fx-ingest     — fetch FX (currency pair) OHLC bars and merge them into the lake
   data-catalog  — list what's stored (the inventory: what assets/symbols/intervals exist)
   data-read     — read stored bars for one asset/symbol/interval back out of the lake
+  lean-export   — write stored crypto bars into the Lean engine's data folder
+                  (the shared volume the lean tool backtests against; see lean_export.py)
 """
 import os
 import sys
@@ -31,6 +33,7 @@ from security.serve import serve  # noqa: E402
 
 import feeds  # noqa: E402
 import lake  # noqa: E402
+import lean_export  # noqa: E402
 
 mcp = FastMCP(name="data")
 
@@ -231,6 +234,45 @@ def data_read(
         f"{len(df)} {interval} {asset} bars for {symbol} ({source}); showing last {len(view)}.\n"
         f"Stored at {path}\n\n"
         f"{view.to_string()}"
+    )
+
+
+@mcp.tool(name="lean-export")
+def lean_export_tool(
+    symbol: str,
+    interval: str = "1d",
+    source: str = "tiingo",
+    market: str = "coinbase",
+) -> str:
+    """
+    Export stored crypto bars from the lake into the Lean engine's data folder.
+
+    This is the bridge to the lean backtesting tool: after crypto-ingest, call this
+    to make the series backtestable. ``symbol``/``interval``/``source`` name the
+    stored lake series (same values as data-read; crypto only). ``market`` is the
+    Lean market the files are registered under (default "coinbase"; also binance,
+    bitfinex, kraken, bybit) — the backtest must then subscribe with the SAME market,
+    e.g. self.add_crypto("BTCUSD", Resolution.DAILY, Market.COINBASE). Re-running
+    overwrites the exported files with the lake's current contents (atomic).
+    """
+    symbol = (symbol or "").strip().upper()
+    source = (source or "tiingo").strip().lower()
+    df = lake.read("crypto", source, symbol, interval)
+    if df is None or df.empty:
+        return (
+            f"Nothing stored for crypto/{source}/{symbol}/{interval} — ingest it first "
+            f"with crypto-ingest, or check data-catalog for what's stored."
+        )
+    try:
+        s = lean_export.export_crypto(df, symbol, interval, market=market)
+    except ValueError as exc:
+        return f"Cannot export crypto {symbol} {interval}: {exc}"
+    return (
+        f"Exported crypto/{source}/{symbol}/{interval} -> Lean {s['market']}/{s['resolution']}: "
+        f"{s['rows']} bars ({s['start']} → {s['end']}) in {s['zips']} zip(s).\n"
+        f"Written to {s['dest']}\n"
+        f"Backtest with: self.add_crypto(\"{symbol}\", Resolution.{s['resolution'].upper()}, "
+        f"Market.{s['market'].upper()})"
     )
 
 

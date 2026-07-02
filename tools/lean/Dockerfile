@@ -18,7 +18,11 @@ RUN python -m venv /app/.venv \
 
 # --- runtime: the engine image, non-root, wrapper venv first on PATH ------------------
 FROM ${BASE}
-RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app \
+    # Shared group for the lean-data volume (fixed gid: must match the data image,
+    # whose 'app' has a different uid) + a group-writable, setgid mount point.
+    && groupadd -g 1500 leandata && usermod -aG leandata app \
+    && mkdir -m 2775 /lean-data && chgrp leandata /lean-data
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \

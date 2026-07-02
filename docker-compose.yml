@@ -101,8 +101,11 @@ services:
       HTTPS_PROXY: http://egress:3129
       HTTP_PROXY: http://egress:3129
       NO_PROXY: localhost,127.0.0.1
+      # Where lean-export writes Lean-format files (the volume shared with lean).
+      LEAN_DATA_ROOT: /lean-data
     volumes:
       - data-state:/app/state
+      - lean-data:/lean-data
     networks:
       - internal
     depends_on:
@@ -124,8 +127,13 @@ services:
       HTTPS_PROXY: http://egress:3130
       HTTP_PROXY: http://egress:3130
       NO_PROXY: localhost,127.0.0.1
+      # The engine backtests ONLY pipeline data (the volume the data tool exports
+      # into) -- never the image's bundled samples. server.py seeds the two engine
+      # metadata files (market hours, symbol properties) there at startup.
+      LEAN_DATA_FOLDER: /lean-data
     volumes:
       - lean-state:/app/state
+      - lean-data:/lean-data
     networks:
       - internal
     depends_on:
@@ -144,3 +152,7 @@ volumes:
   guardrail-hf-cache:
   xmcp-state:
   data-state:
+  # Artifact plane between data (writer: lean-export) and lean (reader: the engine).
+  # Cross-image access works via the shared 'leandata' group (gid 1500) both
+  # Dockerfiles create -- the two images' 'app' users have different uids.
+  lean-data:

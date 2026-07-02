@@ -17,8 +17,10 @@ the algorithm, the config, the engine log, and the results JSON.
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,7 +34,16 @@ from security.serve import serve  # noqa: E402
 # Engine locations inside the quantconnect/lean image; env-overridable for other
 # substrates (e.g. a host checkout during development).
 LAUNCHER_DIR = Path(os.getenv("LEAN_LAUNCHER_DIR", "/Lean/Launcher/bin/Debug"))
+# The deploy points this at the shared lean-data volume (pipeline data ONLY --
+# the data tool's lean-export writes it); default = the image's bundled samples.
 DATA_FOLDER = os.getenv("LEAN_DATA_FOLDER", "/Lean/Data")
+ENGINE_DATA = Path("/Lean/Data")
+# Engine metadata (exchange hours, tick/lot sizes) the engine requires inside its
+# data folder; seeded from the image at startup. NOT price data.
+_ENGINE_METADATA = (
+    "market-hours/market-hours-database.json",
+    "symbol-properties/symbol-properties-database.csv",
+)
 BACKTESTS = Path(os.getenv("LEAN_BACKTESTS_DIR", "/app/state/backtests"))
 MAX_RUN_SECONDS = int(os.getenv("LEAN_MAX_RUN_SECONDS", "1800"))
 LOG_TAIL_LINES = 60
@@ -110,11 +121,11 @@ def backtest(
     groups related runs (e.g. iterations of one strategy) into one folder, like
     lean-cli's <project>/backtests/<timestamp> layout.
 
-    DATA AVAILABLE (the engine's bundled sample set -- backtests outside it find
-    no bars): US equity DAILY 1998-01..2021-03 for SPY, AAPL, IBM, BAC, GOOG,
-    QQQ, IWM and a few others; MINUTE data only for 2013-10-04..2013-10-11 (SPY,
-    AAPL, IBM, BAC and a few others). Prefer Resolution.DAILY with dates inside
-    1998-2021 unless testing intraday logic in that one October 2013 week.
+    DATA: call available_data() FIRST -- this server backtests only the data its
+    pipeline has exported (nothing else exists), and dates outside its coverage
+    find no bars. Subscribe exactly as listed, e.g. crypto:
+    self.add_crypto("BTCUSD", Resolution.DAILY, Market.COINBASE). Missing a
+    series? The data tool's crypto-ingest + lean-export add it.
 
     Runs synchronously -- typically tens of seconds. On failure the engine log
     tail comes back so the algorithm can be fixed and resubmitted.
@@ -246,7 +257,67 @@ def list_backtests(project: str = "") -> list[dict]:
     return sorted(runs, key=lambda run: run["id"], reverse=True)
 
 
+def _zip_coverage(zp: Path) -> tuple[str | None, str | None, int]:
+    """(first bar date, last bar date, bar count) of a daily/hour Lean zip."""
+    try:
+        with zipfile.ZipFile(zp) as z:
+            lines = z.read(z.namelist()[0]).decode(errors="replace").splitlines()
+        first, last = lines[0].split(",", 1)[0][:8], lines[-1].split(",", 1)[0][:8]
+        return first, last, len(lines)
+    except (OSError, zipfile.BadZipFile, IndexError):
+        return None, None, 0
+
+
+@mcp.tool
+def available_data() -> list[dict]:
+    """The market data on this server, one entry per symbol/market/resolution with
+    its date coverage (yyyymmdd). Backtests only work inside this coverage -- check
+    it before writing an algorithm. Empty list = nothing exported yet: ingest and
+    export a series via the data tool (crypto-ingest, then lean-export)."""
+    root = Path(DATA_FOLDER)
+    out: list[dict] = []
+    asset_dirs = [
+        p for p in (sorted(root.iterdir()) if root.exists() else [])
+        if p.is_dir() and p.name not in ("market-hours", "symbol-properties")
+    ]
+    for asset in asset_dirs:
+        for market in sorted(p for p in asset.iterdir() if p.is_dir()):
+            for res in sorted(p for p in market.iterdir() if p.is_dir()):
+                base = {"asset": asset.name, "market": market.name, "resolution": res.name}
+                if res.name == "minute":
+                    for sym in sorted(p for p in res.iterdir() if p.is_dir()):
+                        days = sorted(f.name[:8] for f in sym.glob("*_trade.zip"))
+                        if days:
+                            out.append({**base, "symbol": sym.name.upper(),
+                                        "start": days[0], "end": days[-1]})
+                else:
+                    for zp in sorted(res.glob("*.zip")):
+                        if zp.stem.endswith("_quote"):
+                            continue
+                        start, end, bars = _zip_coverage(zp)
+                        out.append({**base, "symbol": zp.stem.removesuffix("_trade").upper(),
+                                    "start": start, "end": end, "bars": bars})
+    return out
+
+
+def _seed_engine_metadata() -> None:
+    """Copy the engine's two metadata databases into the data folder if absent.
+
+    The engine refuses to start without them, and the shared volume starts empty
+    on purpose (no bundled price data). Version-matched to the engine by
+    construction: they come from this same image.
+    """
+    if Path(DATA_FOLDER) == ENGINE_DATA:
+        return
+    for rel in _ENGINE_METADATA:
+        dest = Path(DATA_FOLDER) / rel
+        if not dest.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ENGINE_DATA / rel, dest)
+
+
 def main() -> None:
+    _seed_engine_metadata()
     BACKTESTS.mkdir(parents=True, exist_ok=True)
     port = int(os.getenv("MCP_PORT", "8064"))
     # Trusted internal tool: it runs agent-authored code against local data and

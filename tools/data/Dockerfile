@@ -19,7 +19,11 @@ RUN OPENBB_AUTO_BUILD=true /app/.venv/bin/python -c "import openbb; openbb.obb; 
 # --- runtime: slim, non-root ---------------------------------------------------------
 FROM ${BASE}
 RUN dnf install -y python3.12 procps-ng shadow-utils && dnf clean all \
-    && groupadd --system app && useradd --system --gid app --home-dir /app app
+    && groupadd --system app && useradd --system --gid app --home-dir /app app \
+    # Shared group for the lean-data volume (fixed gid: must match the lean image,
+    # whose 'app' has a different uid) + a group-writable, setgid mount point.
+    && groupadd -g 1500 leandata && usermod -aG leandata app \
+    && mkdir -m 2775 /lean-data && chgrp leandata /lean-data
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
