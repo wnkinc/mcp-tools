@@ -37,6 +37,11 @@ jobs:
         include:
           - tests: tools/data
             lock: tools/data/requirements.lock
+          - tests: tools/xmcp
+            lock: tools/xmcp/requirements.lock
+          - tests: tools/lean
+            lock: tools/lean/requirements.lock
+            python: "3.11" # the engine image's interpreter, which this lock targets
           # security/ has no lock of its own; xmcp is the max-posture tool, so its
           # lock covers every shared layer (auth + approval + guardrail).
           - tests: security
@@ -46,7 +51,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"  # matches the tool containers
+          python-version: ${{ matrix.python || '3.12' }} # matches each tool container
           cache: pip
           cache-dependency-path: ${{ matrix.lock }}
       # Full lockfile, not a test subset: doubles as "the lock still installs cleanly".
