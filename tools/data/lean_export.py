@@ -64,6 +64,8 @@ def _write_zip(dest: Path, entry_name: str, lines: list[str]) -> None:
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr(entry_name, "\n".join(lines) + "\n")
+        # mkstemp creates 0600; the lean container's different-uid user must read it.
+        os.chmod(tmp, 0o644)
         os.replace(tmp, dest)
     except BaseException:
         os.unlink(tmp)
