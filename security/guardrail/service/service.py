@@ -21,8 +21,20 @@ import os
 from contextlib import asynccontextmanager
 
 import anyio
+import huggingface_hub
 from fastapi import FastAPI
-from llamafirewall import (
+
+if not hasattr(huggingface_hub, "HfFolder"):
+    # huggingface_hub 1.0 removed HfFolder, but llamafirewall 1.0.3 still imports it
+    # (scanners/promptguard_utils.py) — and we need hub >= 1.0 for transformers >= 5.3.0
+    # (RCE fix, see pyproject). Only get_token() is ever called, and only on a cache
+    # miss. Drop this shim when llamafirewall > 1.0.3 supports hub 1.x.
+    class _HfFolder:
+        get_token = staticmethod(huggingface_hub.get_token)
+
+    huggingface_hub.HfFolder = _HfFolder  # type: ignore[attr-defined]
+
+from llamafirewall import (  # noqa: E402
     LlamaFirewall,
     Role,
     ScannerType,
