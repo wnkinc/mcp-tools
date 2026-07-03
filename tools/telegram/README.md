@@ -36,3 +36,31 @@ lives only in the gitignored `.env`.
 
 `pytest tools/telegram` — no Telegram, no network: child-env overrides, schema
 strip, and proxy forwarding against a dummy stdio child.
+
+
+
+
+
+
+
+Now Part 2, the session string. I've already done the prep for you: cloned the generator to
+  ~/tg-session-gen (verified it's the exact same commit we pinned in the Dockerfile, b2f71f1) and
+  installed its dependencies. All that's left is the interactive login, which needs a real terminal
+  (it draws a QR code and prompts) — so run this in a separate terminal window, not through me:
+
+  cd ~/tg-session-gen
+  set -a; source ~/Documents/mcp-tools/tools/telegram/.env; set +a
+  uv run session_string_generator.py --qr
+
+  The middle line loads your TELEGRAM_API_ID/TELEGRAM_API_HASH straight from the .env you just
+  filled, so the generator won't ask for them.
+
+  What happens next:
+
+  1. It prints a QR code in the terminal. On your phone: Telegram → Settings → Devices → Link Desktop
+  Device → scan it. (QR expires after a bit; it redraws automatically, up to 10 times.)
+  2. If you have a 2FA cloud password set, it'll prompt for that.
+  3. When it asks for an account label, just press Enter (empty = the single-account default we
+  scoped).
+  4. It prints the session string — a long base64-looking blob. Copy the whole thing into
+  tools/telegram/.env as TELEGRAM_SESSION_STRING=<paste> (no quotes needed).
