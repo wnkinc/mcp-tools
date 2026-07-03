@@ -2,7 +2,7 @@
 # Portable substrate for the __NAME__ tool (stamped by scripts/new-tool.sh).
 # BUILD CONTEXT = repo root, because the tool imports the shared ./security package:
 #   docker build -f tools/__NAME__/Dockerfile -t mcp-__NAME__ .
-ARG BASE=public.ecr.aws/amazonlinux/amazonlinux@sha256:a450a74bfebfa936e7106d79c8b4b4dd0ca891c790513f84624da02a0e5531db
+ARG BASE=public.ecr.aws/amazonlinux/amazonlinux@sha256:336b735f8f0aa1d591802beb01d2ef85c6a4a3f411ea4ffa35cad8ba5db282af
 
 # --- builder: resolve the venv from the hashed lock (tamper-evident install) ----------
 FROM ${BASE} AS builder
