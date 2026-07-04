@@ -25,9 +25,20 @@ GRANT_ENV = [
     "X_API_TOOL_TAGS",
     "X_API_ALLOW_WRITES",
     "X_BEARER_TOKEN",
+    "X_OAUTH_CONSUMER_KEY",
+    "X_OAUTH_CONSUMER_SECRET",
+    "X_OAUTH_ACCESS_TOKEN",
+    "X_OAUTH_ACCESS_TOKEN_SECRET",
     "MCP_KEEP_OUTPUT_SCHEMA",
     "MCP_APPROVAL_EXEMPT",
 ]
+
+OAUTH1_ENV = {
+    "X_OAUTH_CONSUMER_KEY": "ck",
+    "X_OAUTH_CONSUMER_SECRET": "cs",
+    "X_OAUTH_ACCESS_TOKEN": "at",
+    "X_OAUTH_ACCESS_TOKEN_SECRET": "as",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -211,7 +222,7 @@ def test_create_mcp_strips_output_schemas_for_the_guardrail(monkeypatch):
     _fake_spec_fetch(monkeypatch)
     monkeypatch.setenv("X_BEARER_TOKEN", "token")
     tools = _tools(server.create_mcp())
-    assert set(tools) == {"searchPostsRecent", "grok_x_search"}
+    assert set(tools) == {"searchPostsRecent"}
     # The guardrail nulls structuredContent, so an advertised outputSchema would
     # break the connector's output validation. create_mcp owns the from_openapi
     # tools (serve() can't reach their provider); grok is a LocalProvider tool that
@@ -252,7 +263,7 @@ def test_annotations_split_reads_from_writes(monkeypatch):
 
     read = tools["searchPostsRecent"].annotations
     assert read.readOnlyHint is True
-    assert read.title.startswith("X API: ")
+    assert read.title == "searchPostsRecent"  # summary absent -> operationId, no prefix
 
     post = tools["createPost"].annotations
     assert post.readOnlyHint is False
@@ -262,10 +273,6 @@ def test_annotations_split_reads_from_writes(monkeypatch):
     assert delete.readOnlyHint is False
     assert delete.destructiveHint is True
 
-    grok = tools["grok_x_search"].annotations
-    assert grok.readOnlyHint is True
-    assert grok.title.startswith("xAI Grok: ")
-
 
 def test_approval_exemptions_default_to_the_read_surface(monkeypatch):
     _fake_mixed_spec_fetch(monkeypatch)
@@ -274,8 +281,8 @@ def test_approval_exemptions_default_to_the_read_surface(monkeypatch):
     monkeypatch.setenv("X_API_ALLOW_WRITES", "1")
     server.create_mcp()
     exempt = set(os.environ["MCP_APPROVAL_EXEMPT"].split(","))
-    # Reads + grok flow unapproved; the exposed writes must NOT be exempt.
-    assert exempt == {"searchPostsRecent", "grok_x_search"}
+    # Reads flow unapproved; the exposed writes must NOT be exempt.
+    assert exempt == {"searchPostsRecent"}
 
 
 def test_approval_exemptions_env_wins(monkeypatch):
@@ -284,3 +291,33 @@ def test_approval_exemptions_env_wins(monkeypatch):
     monkeypatch.setenv("MCP_APPROVAL_EXEMPT", "handPicked")
     server.create_mcp()
     assert os.environ["MCP_APPROVAL_EXEMPT"] == "handPicked"
+
+
+# --- OAuth1 user-context auth (upstream's signing, portal-minted tokens) -----------
+
+
+def test_oauth1_client_requires_all_four_values(monkeypatch):
+    assert server.build_oauth1_client() is None
+    for name, value in OAUTH1_ENV.items():
+        monkeypatch.setenv(name, value)
+    assert server.build_oauth1_client() is not None
+    monkeypatch.setenv("X_OAUTH_ACCESS_TOKEN_SECRET", "")  # partial config = OAuth1 off
+    assert server.build_oauth1_client() is None
+
+
+def test_oauth1_signing_produces_authorization_header():
+    client = server.OAuth1Client(
+        client_key="ck", client_secret="cs", resource_owner_key="at", resource_owner_secret="as"
+    )
+    _, headers, _ = client.sign("https://api.x.com/2/users/me", http_method="GET", headers={})
+    assert headers["Authorization"].startswith("OAuth ")
+    assert 'oauth_token="at"' in headers["Authorization"]
+
+
+def test_create_mcp_accepts_oauth1_without_bearer(monkeypatch):
+    _fake_spec_fetch(monkeypatch)
+    for name, value in OAUTH1_ENV.items():
+        monkeypatch.setenv(name, value)
+    # No X_BEARER_TOKEN: the OAuth1 path must carry auth by itself.
+    tools = _tools(server.create_mcp())
+    assert "searchPostsRecent" in tools

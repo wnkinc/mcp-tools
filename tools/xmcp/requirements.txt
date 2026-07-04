@@ -12,3 +12,7 @@ fastmcp==3.4.2
 mcp==1.28.0
 httpx==0.28.1
 python-dotenv==1.2.2
+# OAuth1 user-context request signing (upstream xdevplatform/xmcp's auth path).
+# Signing (HMAC-SHA1) uses no extras, so this adds zero transitive deps.
+# Vetted 2026-07-04: latest release, no OSV advisories.
+oauthlib==3.3.1
