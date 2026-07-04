@@ -58,6 +58,15 @@ The same image runs locally (`docker compose up`) and in the cloud — transport
   central egress audit log. Verified: allowlisted hosts succeed through the proxy, others
   get `TCP_DENIED/403`, and a proxy-bypass attempt is dropped.
 
+- **Approvals live in a sidecar (one owner, one-click for every tool).** Slack
+  delivers every button click to a single app-level Request URL, so pending-approval
+  state can't live per-tool — the approval sidecar (`security/approval/service/`,
+  `http://approval:8072` internally, `approval.<MCP_DOMAIN>` publicly) owns all
+  tokens, the approve page, and the Slack webhook. Tools only create/query their own
+  approvals; decisions are written solely by the human channels (capability-URL page
+  or Slack-signed webhook), so a compromised tool can't approve itself — and the
+  Slack bot token lives in exactly one container.
+
 - **Google OAuth with a verified-email allowlist, fail-closed.** `GoogleProvider`
   authenticates *any* Google account; `security/auth.py` wraps its token verifier to
   accept only logins whose verified email is in `MCP_ALLOWED_GOOGLE_EMAILS`, and requires

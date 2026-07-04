@@ -45,7 +45,7 @@ jobs:
         # is scanned in the next step instead).
         run: |
           refs=$(grep -rhoE '[a-z0-9./_-]+@sha256:[a-f0-9]{64}' \
-              tools/*/Dockerfile security/guardrail/service/Dockerfile docker-compose*.yml \
+              tools/*/Dockerfile security/*/service/Dockerfile docker-compose*.yml \
             | sort -u | grep -vE 'quantconnect|ubuntu/squid')
           echo "scanning:"; echo "$refs"
           for ref in $refs; do

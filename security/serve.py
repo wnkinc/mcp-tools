@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import os
 
-from security.approval.middleware import ApprovalMiddleware, register_approval_routes
+from security.approval.middleware import ApprovalMiddleware
 from security.auth import build_oauth_provider
 from security.guardrail.middleware import GuardrailMiddleware
 
@@ -110,8 +110,11 @@ def serve(
     untrusted_output = _env_override("MCP_UNTRUSTED_OUTPUT", untrusted_output)
 
     if require_approval:
-        mcp.add_middleware(ApprovalMiddleware(exempt=_csv_set(os.getenv(approval_exempt_env))))
-        register_approval_routes(mcp)
+        # State + the human-facing pages live in the approval sidecar (APPROVAL_URL);
+        # this middleware is only the per-tool client (source scopes its approvals).
+        mcp.add_middleware(
+            ApprovalMiddleware(exempt=_csv_set(os.getenv(approval_exempt_env)), source=mcp.name)
+        )
     if untrusted_output:
         mcp.add_middleware(GuardrailMiddleware(source=guardrail_source or mcp.name))
         # The guardrail nulls each result's structuredContent (screening replaces it with

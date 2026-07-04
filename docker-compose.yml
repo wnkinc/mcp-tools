@@ -53,6 +53,37 @@ services:
       start_period: 90s
       retries: 3
 
+  # Approval sidecar: single owner of pending approvals + the Slack secrets for the
+  # whole stack (Slack delivers all button clicks to ONE app-level URL, so approvals
+  # need one owner or only one tool's buttons work). Tools create/check approvals at
+  # http://approval:8072; the tunnel overlay exposes its human-facing pages publicly.
+  approval:
+    build: ./security/approval/service
+    image: mcp-approval
+    restart: unless-stopped
+    env_file:
+      # The Slack credentials -- ONLY this container holds them (tools never do).
+      - path: security/approval/service/.env
+        required: false
+    environment:
+      APPROVAL_HOST: 0.0.0.0
+      APPROVAL_PORT: 8072
+      # Slack posts leave through the egress wall like everything else.
+      HTTPS_PROXY: http://egress:3132
+      HTTP_PROXY: http://egress:3132
+      NO_PROXY: localhost,127.0.0.1
+    networks:
+      - internal
+    depends_on:
+      egress:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8072/healthz',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
   # This tool screens its output through the guardrail (untrusted external content).
   xmcp:
     build:
@@ -80,11 +111,12 @@ services:
       MCP_UNTRUSTED_OUTPUT: "1"
       GUARDRAIL_URL: http://guardrail:8071
       GUARDRAIL_ENABLED: "1"
+      APPROVAL_URL: http://approval:8072
       # All outbound HTTPS is forced through the egress proxy; NO_PROXY keeps sideways +
-      # loopback traffic direct (the guardrail, localhost, the Docker resolver).
+      # loopback traffic direct (the sidecars, localhost, the Docker resolver).
       HTTPS_PROXY: http://egress:3128
       HTTP_PROXY: http://egress:3128
-      NO_PROXY: guardrail,localhost,127.0.0.1
+      NO_PROXY: guardrail,approval,localhost,127.0.0.1
     volumes:
       - xmcp-state:/app/state   # writable state (OAuth registrations + tokens when auth is on)
     networks:
@@ -92,6 +124,8 @@ services:
     depends_on:
       guardrail:
         condition: service_healthy   # wait for the screener before starting
+      approval:
+        condition: service_started
       egress:
         condition: service_started
 
@@ -178,12 +212,13 @@ services:
       MCP_UNTRUSTED_OUTPUT: "1"
       GUARDRAIL_URL: http://guardrail:8071
       GUARDRAIL_ENABLED: "1"
+      APPROVAL_URL: http://approval:8072
       TELEGRAM_PROXY_TYPE: http
       TELEGRAM_PROXY_HOST: egress
       TELEGRAM_PROXY_PORT: "3131"
       HTTPS_PROXY: http://egress:3131
       HTTP_PROXY: http://egress:3131
-      NO_PROXY: guardrail,localhost,127.0.0.1
+      NO_PROXY: guardrail,approval,localhost,127.0.0.1
     volumes:
       - telegram-state:/app/state
     networks:
@@ -191,6 +226,8 @@ services:
     depends_on:
       guardrail:
         condition: service_healthy   # wait for the screener before starting
+      approval:
+        condition: service_started
       egress:
         condition: service_started
 

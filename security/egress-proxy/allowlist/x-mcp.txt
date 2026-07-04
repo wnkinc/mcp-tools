@@ -10,7 +10,3 @@ accounts.google.com
 oauth2.googleapis.com
 www.googleapis.com
 openidconnect.googleapis.com
-# Slack — out-of-band approval gate POSTs to https://slack.com/api/chat.postMessage,
-# and button-click message updates POST to the response_url on hooks.slack.com.
-slack.com
-hooks.slack.com

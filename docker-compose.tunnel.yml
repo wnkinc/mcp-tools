@@ -25,6 +25,12 @@ services:
     # No depends_on: which tools run is chosen per-deploy via COMPOSE_PROFILES, so the
     # ingress can't require any one of them. Routes 502 until their tool is healthy.
 
+  # The approval sidecar's human-facing pages (approve page + Slack webhook) go public
+  # here; APPROVAL_PUBLIC_URL is what the links in chat/Slack point at.
+  approval:
+    environment:
+      APPROVAL_PUBLIC_URL: https://approval.${MCP_DOMAIN}
+
   # The tools' secrets are already loaded by the base; this overlay flips posture on and
   # stamps each tool's public URL from MCP_DOMAIN (environment beats env_file).
   xmcp:
@@ -75,6 +81,11 @@ configs:
           service: http://lean:8064
         - hostname: telegram.${MCP_DOMAIN}
           service: http://telegram:8063
+        # The approval sidecar's public pages: the capability-token approve page and
+        # the Slack interactivity webhook (signature-verified). Point the Slack app's
+        # ONE Request URL at https://approval.<MCP_DOMAIN>/slack/interact.
+        - hostname: approval.${MCP_DOMAIN}
+          service: http://approval:8072
 
         # Everything else is refused.
         - service: http_status:404

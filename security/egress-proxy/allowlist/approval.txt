@@ -1,0 +1,5 @@
+# approval sidecar egress allowlist (squid dstdomain). The whole job: post the
+# Approve/Deny card (slack.com chat.postMessage) and update it after a click
+# (hooks.slack.com response_url). Nothing else, ever.
+slack.com
+hooks.slack.com

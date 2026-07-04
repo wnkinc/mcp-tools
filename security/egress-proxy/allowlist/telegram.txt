@@ -7,7 +7,3 @@ accounts.google.com
 oauth2.googleapis.com
 www.googleapis.com
 openidconnect.googleapis.com
-# Slack -- the approval gate posts cards to chat.postMessage and answers
-# button clicks via hooks.slack.com response_urls (same pair as x-mcp).
-slack.com
-hooks.slack.com
