@@ -1,19 +1,23 @@
-"""MCP server: X (Twitter) search/lookup, built directly on FastMCP.
+"""MCP server: X (Twitter) API tools, closely following xdevplatform/xmcp.
 
-This is our own thin server on top of ``fastmcp`` (the OSS library) -- NOT a vendored
-copy of any app. It fetches X's OpenAPI spec, filters it down to a code-enforced
-grant (read-only by default), and exposes the result as MCP tools via
-``FastMCP.from_openapi``, plus a custom ``grok_x_search`` tool. Auth is app-only
-Bearer (no act-as-account) -- which also means write operations, even when exposed
-via ``X_API_ALLOW_WRITES``, fail at X until user-context OAuth is wired in.
+This is upstream's ``server.py`` (https://github.com/xdevplatform/xmcp) with a
+minimal delta, run through our shared security stack. It fetches X's OpenAPI spec,
+filters it down to a code-enforced grant (read-only by default), and exposes the
+result as MCP tools via ``FastMCP.from_openapi``.
 
-Every tool carries MCP ``ToolAnnotations``: ``readOnlyHint`` splits the surface into
-the read-only vs write/delete permission categories Claude's connector UI shows
-(the same mechanism the telegram engine uses), and the annotation title names the
-backing API ("X API: ..." vs "xAI Grok: ...").
+X auth, in upstream's order of preference: OAuth1 user-context signing of EVERY
+request (act-as-account; the four ``X_OAUTH_*`` values, minted in the developer
+portal -- we skip upstream's interactive browser-consent flow, which can't run in
+a headless container) with app-only ``X_BEARER_TOKEN`` as the read-only fallback.
+Write operations require the OAuth1 path (a bearer token cannot act as an account).
 
-The cross-cutting security layers (OAuth, out-of-band approval, guardrail screening)
-and the HTTP run are applied uniformly by ``security.serve.serve`` in :func:`main`.
+Our delta from upstream, besides the auth-flow trim: the ``serve()`` wrapper
+(Google OAuth, out-of-band approval, guardrail), the write-guard + allowlist
+default (upstream exposes all ~140 ops unconditionally), MCP ``ToolAnnotations``
+(``readOnlyHint`` drives Claude's read-only vs write/delete permission categories;
+upstream sets none), and the guardrail outputSchema strip. A custom ``grok_x_search``
+tool (xAI Grok's own X search; not part of upstream) lived here until 2026-07-04 --
+recover it from git history if wanted; its XAI_* env keys remain parked in `.env`.
 """
 
 import copy
@@ -24,8 +28,8 @@ from pathlib import Path
 
 import httpx
 from fastmcp import FastMCP
-from fastmcp.tools import Tool
 from mcp.types import ToolAnnotations
+from oauthlib.oauth1 import Client as OAuth1Client
 
 # Make the repo root importable regardless of the process CWD (we run from the tool
 # dir), then pull in the shared serve() helper.
@@ -93,11 +97,38 @@ def setup_logging() -> bool:
 
 
 def get_auth_headers() -> dict:
-    """App-only Bearer header. Read-only; no OAuth1 user flow, no act-as-account."""
+    """App-only Bearer header: the read-only fallback when OAuth1 isn't configured."""
     token = os.getenv("X_BEARER_TOKEN", "").strip()
     if not token:
-        raise RuntimeError("Set X_BEARER_TOKEN (read-only app bearer) in the .env.")
+        raise RuntimeError(
+            "Set the four X_OAUTH_* values (user-context) or X_BEARER_TOKEN "
+            "(read-only app bearer) in the .env."
+        )
     return {"Authorization": f"Bearer {token}"}
+
+
+def build_oauth1_client() -> OAuth1Client | None:
+    """Upstream's OAuth1 signing client, minus its interactive consent flow.
+
+    Upstream mints the access token/secret by opening a browser at startup; that
+    can't happen in a headless container, so ours arrive pre-minted from the X
+    developer portal ("Keys and tokens" -> Access Token and Secret, generated
+    AFTER the app permission is read+write) via `.env`. All four values or the
+    OAuth1 path is off (None -> app-only bearer fallback, read-only).
+    """
+    consumer_key = os.getenv("X_OAUTH_CONSUMER_KEY", "").strip()
+    consumer_secret = os.getenv("X_OAUTH_CONSUMER_SECRET", "").strip()
+    access_token = os.getenv("X_OAUTH_ACCESS_TOKEN", "").strip()
+    access_secret = os.getenv("X_OAUTH_ACCESS_TOKEN_SECRET", "").strip()
+    if not all((consumer_key, consumer_secret, access_token, access_secret)):
+        return None
+    return OAuth1Client(
+        client_key=consumer_key,
+        client_secret=consumer_secret,
+        resource_owner_key=access_token,
+        resource_owner_secret=access_secret,
+        signature_type="AUTH_HEADER",
+    )
 
 
 def load_openapi_spec() -> dict:
@@ -250,7 +281,7 @@ def apply_approval_exemptions(filtered_spec: dict) -> None:
     filtered spec instead of maintained by hand: reads flow without out-of-band
     approval, while any exposed write (X_API_ALLOW_WRITES=1) blocks on the gate.
     """
-    exempt = collect_read_operation_ids(filtered_spec) | {"grok_x_search"}
+    exempt = collect_read_operation_ids(filtered_spec)
     os.environ.setdefault("MCP_APPROVAL_EXEMPT", ",".join(sorted(exempt)))
 
 
@@ -259,11 +290,10 @@ def build_annotations(route) -> ToolAnnotations:  # type: ignore[no-untyped-def]
 
     ``readOnlyHint`` is what Claude's connector UI groups the permission categories
     by (read-only vs write/delete, each with its own always-allow/approve/block
-    policy) -- the same mechanism the telegram engine uses. The title prefix names
-    the backing API so the two surfaces sort apart in the tool list.
+    policy) -- the same mechanism the telegram engine uses.
     """
     method = (route.method or "").upper()
-    title = f"X API: {route.summary or route.operation_id}"
+    title = route.summary or route.operation_id
     if method == "GET":
         return ToolAnnotations(title=title, readOnlyHint=True, openWorldHint=True)
     return ToolAnnotations(
@@ -292,60 +322,6 @@ def print_tool_list(spec: dict) -> None:
         print(f"- {tool}")
 
 
-# Grok-mediated X search tool: calls xAI's Responses API with the `x_search` tool —
-# Grok searches X and returns a cited natural-language summary (vs the raw posts from
-# the X-API tools). >>> MODEL LEVER: set XAI_MODEL in .env to switch Grok models. <<<
-XAI_RESPONSES_URL = "https://api.x.ai/v1/responses"
-DEFAULT_XAI_MODEL = "grok-4-1-fast"  # non-reasoning (cheaper/faster); use *-reasoning for depth
-
-
-async def grok_x_search(query: str) -> str:
-    """Search X (Twitter) via xAI Grok's x_search and return a cited summary.
-
-    Grok performs the search itself and returns a concise natural-language answer with
-    citations — use for "what are people saying / summarize the discussion on X about
-    ...". For raw post objects, use the X-API tools (searchPostsRecent, etc.) instead.
-
-    Args:
-        query: What to search X for, in natural language.
-    """
-    api_key = os.environ.get("XAI_API_KEY", "").strip()
-    if not api_key:
-        return "[grok_x_search: XAI_API_KEY not set in xMCP .env]"
-    model = os.environ.get("XAI_MODEL", DEFAULT_XAI_MODEL)
-    payload = {"model": model, "tools": [{"type": "x_search"}], "input": query}
-    try:
-        async with httpx.AsyncClient(timeout=180) as client:
-            resp = await client.post(
-                XAI_RESPONSES_URL,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-    except Exception as exc:  # noqa: BLE001
-        return f"[grok_x_search: request to xAI failed: {exc}]"
-    if resp.status_code >= 400:
-        return f"[grok_x_search: xAI API error {resp.status_code}: {resp.text[:400]}]"
-    data = resp.json()
-    texts: list[str] = []
-    citations: list[str] = []
-    for item in data.get("output", []) or []:
-        if item.get("type") == "message":
-            for block in item.get("content", []) or []:
-                if block.get("text"):
-                    texts.append(block["text"])
-                for ann in block.get("annotations", []) or []:
-                    if ann.get("url"):
-                        citations.append(ann["url"])
-    out = "\n".join(texts).strip()
-    if not out:
-        import json as _json
-
-        out = _json.dumps(data)[:1500]  # fallback so the response shape is visible
-    if citations:
-        out += "\n\nCitations:\n" + "\n".join(f"- {u}" for u in dict.fromkeys(citations))
-    return out + f"\n\n(via xAI model: {model})"
-
-
 def create_mcp() -> FastMCP:
     load_env()
     debug_enabled = setup_logging()
@@ -355,6 +331,14 @@ def create_mcp() -> FastMCP:
 
     base_url = os.getenv("X_API_BASE_URL", "https://api.x.com")
     timeout = float(os.getenv("X_API_TIMEOUT", "30"))
+
+    # Upstream's auth: OAuth1 user-context when configured (signs EVERY request,
+    # reads and writes act as the account), else the app-only bearer (read-only).
+    oauth1_client = build_oauth1_client()
+    if oauth1_client is None:
+        LOGGER.warning("X auth: app-only bearer (read-only; writes would fail at X)")
+    else:
+        LOGGER.warning("X auth: OAuth1 user-context (all requests signed, act-as-account)")
 
     spec = load_openapi_spec()
     filtered_spec = filter_openapi_spec(spec)
@@ -394,6 +378,28 @@ def create_mcp() -> FastMCP:
 
         request.url = request.url.copy_with(params=normalized)
 
+    # Upstream's signing hook, verbatim: runs AFTER normalize_query_params (the
+    # signature must cover the final URL). Only form-encoded bodies are signed --
+    # per the OAuth1 spec, JSON bodies are excluded from the signature base.
+    b3_flags = os.getenv("X_B3_FLAGS", "1")
+
+    async def sign_oauth1_request(request: httpx.Request) -> None:
+        request.headers["X-B3-Flags"] = b3_flags
+        headers = dict(request.headers)
+        content_type = headers.get("Content-Type", "")
+        body: str | None = None
+        if content_type.startswith("application/x-www-form-urlencoded"):
+            body_bytes = request.content or b""
+            body = body_bytes.decode("utf-8")
+        signed_url, signed_headers, _ = oauth1_client.sign(
+            str(request.url),
+            http_method=request.method,
+            body=body,
+            headers=headers,
+        )
+        request.url = httpx.URL(signed_url)
+        request.headers.update(signed_headers)
+
     async def log_request(request: httpx.Request) -> None:
         if debug_enabled:
             LOGGER.info("X API request %s %s", request.method, request.url)
@@ -417,12 +423,19 @@ def create_mcp() -> FastMCP:
                 text = text[:1000] + "...<truncated>"
             LOGGER.warning("X API error body: %s", text)
 
+    if oauth1_client is None:
+        headers = get_auth_headers()  # {"Authorization": "Bearer <X_BEARER_TOKEN>"}
+        request_hooks = [normalize_query_params, log_request]
+    else:
+        headers = {}  # the signing hook supplies the Authorization header per request
+        request_hooks = [normalize_query_params, sign_oauth1_request, log_request]
+
     client = httpx.AsyncClient(
         base_url=base_url,
-        headers=get_auth_headers(),  # {"Authorization": "Bearer <X_BEARER_TOKEN>"}
+        headers=headers,
         timeout=timeout,
         event_hooks={
-            "request": [normalize_query_params, log_request],
+            "request": request_hooks,
             "response": [log_response],
         },
     )
@@ -433,7 +446,7 @@ def create_mcp() -> FastMCP:
     #   True)) and the guardrail nulls each result's structuredContent, so any tool
     #   advertising an outputSchema then fails the Claude connector's output validation
     #   (outputSchema with no structuredContent). Same MCP_KEEP_OUTPUT_SCHEMA escape
-    #   hatch as serve()'s LocalProvider pass (which handles grok).
+    #   hatch as serve()'s LocalProvider pass.
     # - annotations: read/write hints + API-source title (see build_annotations).
     keep_output_schema = is_truthy(os.getenv("MCP_KEEP_OUTPUT_SCHEMA", "0"))
 
@@ -443,23 +456,12 @@ def create_mcp() -> FastMCP:
         if hasattr(component, "annotations"):
             component.annotations = build_annotations(route)
 
-    mcp = FastMCP.from_openapi(
+    return FastMCP.from_openapi(
         openapi_spec=filtered_spec,
         client=client,
         name="X API MCP",
         mcp_component_fn=_customize_component,
     )
-    # The grok tool (add_tool -> LocalProvider) is schema-stripped by serve()'s
-    # LocalProvider pass; its annotations are declared here.
-    mcp.add_tool(
-        Tool.from_function(
-            grok_x_search,
-            annotations=ToolAnnotations(
-                title="xAI Grok: X search", readOnlyHint=True, openWorldHint=True
-            ),
-        )
-    )
-    return mcp
 
 
 def main() -> None:
