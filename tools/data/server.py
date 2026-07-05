@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 # Make the repo root importable regardless of CWD (we run from the tool dir), then
 # load the shared Google-OAuth provider used by every public server.
@@ -32,7 +33,16 @@ import lake  # noqa: E402
 import lean_export  # noqa: E402
 from security.serve import serve  # noqa: E402
 
-mcp = FastMCP(name="data")
+# Server-level instructions land in the client's system prompt: the cross-tool
+# pipeline lives here, per-tool contracts stay in each docstring.
+INSTRUCTIONS = (
+    "The lake is the staging store for the Lean backtesting pipeline: crypto-ingest "
+    "fetches bars into it, lean-export makes a stored series backtestable by the lean "
+    "tool. Discover what's stored with data-catalog before reading; what the lean tool "
+    "can actually backtest is its own available_data, not the lake."
+)
+
+mcp = FastMCP(name="data", instructions=INSTRUCTIONS)
 
 
 def load_env() -> None:
@@ -90,7 +100,20 @@ def _ingest(asset: str, source: str, fetch, symbol, interval, start, end, refres
     return _fmt(summary, partial=df.attrs.get("partial"))
 
 
-@mcp.tool(name="crypto-ingest")
+# readOnlyHint groups Claude's permission categories (read-only vs write/delete),
+# same mechanism as xmcp's build_annotations. Nothing here is destructive: ingest
+# merges (refresh re-fetches from the provider) and export overwrites a derived
+# artifact rebuilt from the lake.
+@mcp.tool(
+    name="crypto-ingest",
+    annotations=ToolAnnotations(
+        title="Ingest crypto bars",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
+)
 def crypto_ingest(
     symbol: str,
     interval: str = "1d",
@@ -127,7 +150,12 @@ def _fmt_catalog(entries: list[dict], header: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool(name="data-catalog")
+@mcp.tool(
+    name="data-catalog",
+    annotations=ToolAnnotations(
+        title="List stored datasets", readOnlyHint=True, openWorldHint=False
+    ),
+)
 def data_catalog(asset: str = "") -> str:
     """
     List the market data stored in the lake — the inventory of what's available.
@@ -150,7 +178,10 @@ def data_catalog(asset: str = "") -> str:
     return _fmt_catalog(entries, f"Lake — {scope} ({len(entries)}):")
 
 
-@mcp.tool(name="data-read")
+@mcp.tool(
+    name="data-read",
+    annotations=ToolAnnotations(title="Read stored bars", readOnlyHint=True, openWorldHint=False),
+)
 def data_read(
     asset: str,
     symbol: str,
@@ -195,7 +226,16 @@ def data_read(
     )
 
 
-@mcp.tool(name="lean-export")
+@mcp.tool(
+    name="lean-export",
+    annotations=ToolAnnotations(
+        title="Export bars to Lean",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+)
 def lean_export_tool(
     symbol: str,
     interval: str = "1d",

@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 # Make the repo root importable regardless of CWD, then load the shared serve()
 # helper (applies OAuth + optional guardrail/approval, then runs).
@@ -48,7 +49,15 @@ BACKTESTS = Path(os.getenv("LEAN_BACKTESTS_DIR", "/app/state/backtests"))
 MAX_RUN_SECONDS = int(os.getenv("LEAN_MAX_RUN_SECONDS", "1800"))
 LOG_TAIL_LINES = 60
 
-mcp = FastMCP(name="lean")
+# Server-level instructions land in the client's system prompt: the cross-tool
+# workflow lives here, per-tool contracts stay in each docstring.
+INSTRUCTIONS = (
+    "Backtests only find data this server's pipeline has exported — check "
+    "available_data before writing an algorithm and subscribe exactly as listed. "
+    "A missing series is added with the data tool (crypto-ingest, then lean-export)."
+)
+
+mcp = FastMCP(name="lean", instructions=INSTRUCTIONS)
 
 _CLASS_RE = re.compile(r"^class\s+(\w+)\s*\([^)]*QCAlgorithm[^)]*\)", re.MULTILINE)
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9-]+")
@@ -109,7 +118,18 @@ def _tail(path: Path, lines: int = LOG_TAIL_LINES) -> str:
     return "\n".join(path.read_text(errors="replace").splitlines()[-lines:])
 
 
-@mcp.tool
+# readOnlyHint groups Claude's permission categories (read-only vs write/delete),
+# same mechanism as xmcp's build_annotations. backtest is the one write: each run
+# creates a fresh folder (never overwrites), entirely local to the engine.
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Run Lean backtest",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
+)
 def backtest(code: str, name: str = "", project: str = "", timeout_seconds: int = 600) -> dict:
     """Run a Lean backtest of a Python QCAlgorithm and return its statistics.
 
@@ -204,7 +224,9 @@ def backtest(code: str, name: str = "", project: str = "", timeout_seconds: int 
     }
 
 
-@mcp.tool
+@mcp.tool(
+    annotations=ToolAnnotations(title="Backtest result", readOnlyHint=True, openWorldHint=False)
+)
 def backtest_result(backtest_id: str) -> dict:
     """Full results of a past backtest: statistics, trade/portfolio breakdowns,
     and order events. Run folders under the state volume persist across restarts."""
@@ -252,7 +274,9 @@ def _engine_status(job: Path) -> str:
         return "unknown"
 
 
-@mcp.tool
+@mcp.tool(
+    annotations=ToolAnnotations(title="List backtests", readOnlyHint=True, openWorldHint=False)
+)
 def list_backtests(project: str = "") -> list[dict]:
     """Past backtests (newest first), optionally one project's only. Everything is
     derived from the run folders; the id embeds the run's timestamp and name."""
@@ -276,7 +300,11 @@ def _zip_coverage(zp: Path) -> tuple[str | None, str | None, int]:
         return None, None, 0
 
 
-@mcp.tool
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Available backtest data", readOnlyHint=True, openWorldHint=False
+    )
+)
 def available_data() -> list[dict]:
     """The market data on this server, one entry per symbol/market/resolution with
     its date coverage (yyyymmdd). Backtests only work inside this coverage -- check
