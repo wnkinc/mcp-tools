@@ -1,0 +1,10 @@
+name: mcp-tools-aws
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: >-
+  Cloud deployment of the mcp-tools stack: one EC2 VM running the same
+  docker-compose stack as a local deploy, fronted by a Cloudflare Tunnel this
+  program creates, with a Bedrock Guardrail as the default output screen.
+  Full runbook: docs/deploy/aws.md.

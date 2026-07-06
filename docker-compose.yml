@@ -58,11 +58,13 @@ services:
       BEDROCK_GUARDRAIL_VERSION: ${BEDROCK_GUARDRAIL_VERSION:-DRAFT}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       # Both providers' outbound traffic (HF pull / Bedrock API) leaves through the
-      # egress wall on the guardrail's own allowlisted listener. The instance-role
-      # credential endpoints (IMDS/ECS) are link-local -> NO_PROXY keeps them direct.
+      # egress wall on the guardrail's own allowlisted listener. That includes the
+      # EC2 instance-metadata credential endpoint on cloud deploys: the sealed
+      # internal network has no route to link-local, so squid carries IMDS on a
+      # pinned allow (see squid.compose.conf).
       HTTPS_PROXY: http://egress:3133
       HTTP_PROXY: http://egress:3133
-      NO_PROXY: localhost,127.0.0.1,169.254.169.254,169.254.170.2
+      NO_PROXY: localhost,127.0.0.1
     volumes:
       - guardrail-hf-cache:/app/.cache/huggingface   # persist the model cache across restarts
     networks:

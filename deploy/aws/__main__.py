@@ -1,0 +1,294 @@
+"""mcp-tools on AWS: the same docker-compose stack as a local deploy, on one EC2 VM.
+
+What this program owns (and `pulumi destroy` removes):
+  - a Cloudflare Tunnel + one wildcard DNS record (ingress; the VM dials out, so
+    the security group has zero inbound rules — admin access is SSM Session Manager)
+  - an EC2 instance (default: t3.large, 60 GB gp3) that boots docker, clones the
+    repo at a pinned ref, renders the root .env, and brings up
+    docker-compose.yml + docker-compose.tunnel.yml
+  - the guardrail's cloud provider: an Amazon Bedrock Guardrail (prompt-attack
+    filter only) + an instance role scoped to ApplyGuardrail on it
+  - SSM SecureString parameters carrying the two boot secrets (tunnel credentials,
+    optional HF token) — secrets stay out of user-data, which is API-readable
+
+What stays manual (see docs/deploy/aws.md): the Google OAuth client, per-tool
+.env files (dropped onto the VM over SSM), and the optional Slack app.
+
+Config (pulumi config set <key> <value>):
+  domain               (required)  parent domain, on Cloudflare
+  cloudflareAccountId  (required)
+  cloudflareZoneId     (required)  zone of <domain>
+  tools                default "xmcp,data" — comma list of tool profiles
+  guardrail            default "bedrock" — bedrock | llamafirewall | off
+  hfToken              secret; llamafirewall mode only
+  repoUrl              default: the upstream repo
+  repoRef              default "main" — pin a tag/commit for reproducible deploys
+  instanceType         default "t3.large"
+  volumeGb             default 60 (lean's 13 GB base image wants more)
+  aws:region           the deploy region (bedrock guardrail lives here too)
+Cloudflare API token: CLOUDFLARE_API_TOKEN env or `pulumi config set cloudflare:apiToken --secret`.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+
+import pulumi
+import pulumi_aws as aws
+import pulumi_cloudflare as cloudflare
+import pulumi_random as random_
+
+UPSTREAM_REPO = "https://github.com/wnkinc/claude-custom-connector-server.git"
+
+cfg = pulumi.Config()
+domain = cfg.require("domain")
+cf_account_id = cfg.require("cloudflareAccountId")
+cf_zone_id = cfg.require("cloudflareZoneId")
+tools = [t.strip() for t in (cfg.get("tools") or "xmcp,data").split(",") if t.strip()]
+guardrail_mode = cfg.get("guardrail") or "bedrock"
+repo_url = cfg.get("repoUrl") or UPSTREAM_REPO
+repo_ref = cfg.get("repoRef") or "main"
+instance_type = cfg.get("instanceType") or "t3.large"
+volume_gb = cfg.get_int("volumeGb") or 60
+hf_token = cfg.get_secret("hfToken")
+
+if guardrail_mode not in ("bedrock", "llamafirewall", "off"):
+    raise ValueError(f"guardrail must be bedrock|llamafirewall|off, got {guardrail_mode!r}")
+
+region = aws.get_region().name
+stack = pulumi.get_stack()
+prefix = f"mcp-tools-{stack}"
+
+# --- ingress: Cloudflare Tunnel + wildcard DNS -----------------------------------
+# Mirrors docs/SETUP.md's manual steps: one tunnel, one `*` CNAME. Routing stays in
+# the committed docker-compose.tunnel.yml; the tunnel resource here is transport
+# identity only.
+tunnel_secret = random_.RandomPassword(f"{prefix}-tunnel-secret", length=48, special=False)
+tunnel_secret_b64 = tunnel_secret.result.apply(lambda s: base64.b64encode(s.encode()).decode())
+
+tunnel = cloudflare.Tunnel(
+    f"{prefix}-tunnel",
+    account_id=cf_account_id,
+    name=prefix,
+    secret=tunnel_secret_b64,
+    config_src="local",  # ingress rules come from the repo's compose overlay
+)
+
+wildcard = cloudflare.Record(
+    f"{prefix}-wildcard",
+    zone_id=cf_zone_id,
+    name="*",
+    type="CNAME",
+    value=tunnel.id.apply(lambda i: f"{i}.cfargotunnel.com"),
+    proxied=True,
+    ttl=1,  # proxied records are always TTL "auto"
+)
+
+# The credentials JSON cloudflared expects, staged for the VM as a SecureString so
+# the secret rides SSM (KMS-encrypted, IAM-gated) instead of instance user-data.
+creds_param = aws.ssm.Parameter(
+    f"{prefix}-tunnel-creds",
+    name=f"/{prefix}/tunnel-creds",
+    type="SecureString",
+    value=pulumi.Output.json_dumps(
+        {"AccountTag": cf_account_id, "TunnelSecret": tunnel_secret_b64, "TunnelID": tunnel.id}
+    ),
+)
+
+hf_param = None
+if guardrail_mode == "llamafirewall" and hf_token:
+    hf_param = aws.ssm.Parameter(
+        f"{prefix}-hf-token",
+        name=f"/{prefix}/hf-token",
+        type="SecureString",
+        value=hf_token,
+    )
+
+# --- guardrail: Bedrock (the cloud default) ---------------------------------------
+guardrail = None
+if guardrail_mode == "bedrock":
+    withheld = "[guardrail: content withheld -- the screen flagged likely prompt-injection.]"
+    guardrail = aws.bedrock.Guardrail(
+        f"{prefix}-guardrail",
+        name=prefix,
+        description="mcp-tools output screen: prompt-attack filter only (parity with PromptGuard).",
+        blocked_input_messaging=withheld,
+        blocked_outputs_messaging=withheld,
+        content_policy_config={
+            "filters_configs": [
+                {"type": "PROMPT_ATTACK", "input_strength": "HIGH", "output_strength": "NONE"}
+            ]
+        },
+    )
+
+# --- instance identity: SSM admin + exactly the two boot reads + ApplyGuardrail ---
+role = aws.iam.Role(
+    f"{prefix}-role",
+    assume_role_policy=json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "ec2.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    ),
+)
+aws.iam.RolePolicyAttachment(
+    f"{prefix}-ssm-core",
+    role=role.name,
+    policy_arn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+)
+
+
+def _inline_policy(args: dict) -> str:
+    statements = [
+        {
+            "Effect": "Allow",
+            "Action": "ssm:GetParameter",
+            "Resource": [a for a in (args["creds_arn"], args["hf_arn"]) if a],
+        }
+    ]
+    if args["guardrail_arn"]:
+        statements.append(
+            {
+                "Effect": "Allow",
+                "Action": "bedrock:ApplyGuardrail",
+                "Resource": args["guardrail_arn"],
+            }
+        )
+    return json.dumps({"Version": "2012-10-17", "Statement": statements})
+
+
+aws.iam.RolePolicy(
+    f"{prefix}-boot-and-guardrail",
+    role=role.name,
+    policy=pulumi.Output.all(
+        creds_arn=creds_param.arn,
+        hf_arn=hf_param.arn if hf_param else "",
+        guardrail_arn=guardrail.guardrail_arn if guardrail else "",
+    ).apply(_inline_policy),
+)
+profile = aws.iam.InstanceProfile(f"{prefix}-profile", role=role.name)
+
+# --- the VM ------------------------------------------------------------------------
+default_vpc = aws.ec2.get_vpc(default=True)
+sg = aws.ec2.SecurityGroup(
+    f"{prefix}-sg",
+    vpc_id=default_vpc.id,
+    description="mcp-tools: zero inbound (tunnel + SSM dial out); all egress",
+    egress=[
+        {
+            "protocol": "-1",
+            "from_port": 0,
+            "to_port": 0,
+            "cidr_blocks": ["0.0.0.0/0"],
+            "ipv6_cidr_blocks": ["::/0"],
+        }
+    ],
+)
+
+ami_id = aws.ssm.get_parameter(
+    name="/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+).value
+
+
+def _user_data(a: dict) -> str:
+    profiles = ",".join(tools + (["guardrail"] if guardrail_mode != "off" else []))
+    env = [
+        f"COMPOSE_PROFILES={profiles}",
+        f"MCP_DOMAIN={domain}",
+        f"TUNNEL_ID={a['tunnel_id']}",
+        "HOST_UID=1000",
+        "HOST_GID=1000",
+        f"GUARDRAIL_ENABLED={'1' if guardrail_mode != 'off' else '0'}",
+    ]
+    if guardrail_mode == "bedrock":
+        env += [
+            "GUARDRAIL_PROVIDER=bedrock",
+            f"BEDROCK_GUARDRAIL_ID={a['guardrail_id']}",
+            "BEDROCK_GUARDRAIL_VERSION=DRAFT",
+            f"AWS_REGION={region}",
+        ]
+    elif guardrail_mode == "llamafirewall":
+        env.append("GUARDRAIL_PROVIDER=llamafirewall")
+    env_body = "\n".join(env)
+
+    hf_fetch = ""
+    if a["hf_param"]:
+        hf_fetch = (
+            f'echo "HF_TOKEN=$(aws ssm get-parameter --name {a["hf_param"]} '
+            f"--with-decryption --region {region} "
+            f'--query Parameter.Value --output text)" >> .env\n'
+        )
+
+    return f"""#!/bin/bash
+set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -q
+apt-get install -yq docker.io docker-compose-v2 git awscli
+systemctl enable --now docker
+
+git clone --depth 1 --branch {repo_ref} {repo_url} /opt/mcp-tools
+cd /opt/mcp-tools
+
+# Pin the guardrail's egress allowlist to this deploy's bedrock endpoint.
+sed -i -E 's/bedrock-runtime\\.[a-z0-9-]+\\.amazonaws\\.com/bedrock-runtime.{region}.amazonaws.com/' security/egress-proxy/allowlist/guardrail.txt
+
+# Tunnel credentials: SSM -> the gitignored path the compose overlay mounts.
+mkdir -p security/ingress/secrets
+aws ssm get-parameter --name {a["creds_param"]} --with-decryption --region {region} \\
+  --query Parameter.Value --output text > security/ingress/secrets/creds.json
+chown 1000:1000 security/ingress/secrets/creds.json
+chmod 600 security/ingress/secrets/creds.json
+
+cat > .env <<'ENVEOF'
+{env_body}
+ENVEOF
+{hf_fetch}
+# Per-tool secrets (tools/<tool>/.env) arrive later over SSM; required:false in
+# compose lets the stack come up while a tool waits for its secrets.
+docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+"""
+
+
+user_data = pulumi.Output.all(
+    tunnel_id=tunnel.id,
+    creds_param=creds_param.name,
+    guardrail_id=guardrail.guardrail_id if guardrail else "",
+    hf_param=hf_param.name if hf_param else "",
+).apply(_user_data)
+
+instance = aws.ec2.Instance(
+    f"{prefix}-vm",
+    ami=ami_id,
+    instance_type=instance_type,
+    vpc_security_group_ids=[sg.id],
+    iam_instance_profile=profile.name,
+    user_data=user_data,
+    user_data_replace_on_change=True,  # boot script drift -> fresh VM, never a half-state
+    metadata_options={
+        "http_tokens": "required",
+        # The guardrail container reaches IMDS through the egress proxy (one extra
+        # network hop), so the default hop limit of 1 would drop the responses.
+        "http_put_response_hop_limit": 2,
+    },
+    root_block_device={"volume_size": volume_gb, "volume_type": "gp3"},
+    tags={"Name": prefix, "project": "mcp-tools"},
+)
+
+pulumi.export("instanceId", instance.id)
+pulumi.export(
+    "connect",
+    pulumi.Output.concat("aws ssm start-session --target ", instance.id, " --region ", region),
+)
+pulumi.export("tunnelId", tunnel.id)
+pulumi.export(
+    "guardrailId", guardrail.guardrail_id if guardrail else "(guardrail: " + guardrail_mode + ")"
+)
+pulumi.export("connectorUrls", [f"https://{t}.{domain}/mcp" for t in tools])
+pulumi.export("approvalUrl", f"https://approval.{domain}")
