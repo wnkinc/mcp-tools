@@ -39,11 +39,16 @@ New tool: `scripts/new-tool.sh`. Deploying:
 
 ## The model in one breath
 
-One **portable tool per container**: a FastMCP server that reads its transport and
-security posture from **env**, so one image runs locally and in the cloud unchanged.
-Each tool sits on an **internal Docker network sealed from the internet** — all egress
-goes through a **squid allowlist sidecar**, so a bad dep stays confined to its allowlist.
-A **Cloudflare Tunnel** sidecar fronts them, each on its own subdomain (transport only;
-the server owns auth). **Auth lives in the MCP server** (FastMCP Google OAuth with a
-verified-email allowlist), so it travels with the image and works uniformly across Claude
-desktop, web, and mobile.
+One **portable tool per container**: a FastMCP server that reads its transport
+and security posture from **env**, so the same image runs locally and in the
+cloud unchanged. Tools sit on an **internal Docker network with no route to the
+internet**; the only way out is the **squid egress sidecar**, and each tool gets
+its **own listener and domain allowlist** there — a bad dep can only reach its
+own tool's short list. A **Cloudflare Tunnel** sidecar fronts them, one
+subdomain per tool (transport only; **auth lives in each MCP server** — Google
+OAuth with a verified-email allowlist — so it travels with the image and works
+across Claude desktop, web, and mobile). Two more sidecars round out the
+substrate: a **guardrail** that screens the untrusted tools' output for prompt
+injection before it reaches your model context (provider env-chosen: local
+model or Amazon Bedrock Guardrails), and an **approval** service for
+human-in-the-loop gating of sensitive tool calls.
