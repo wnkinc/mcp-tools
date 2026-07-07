@@ -9,8 +9,14 @@ This directory holds only the **secret half**: the tunnel's credentials JSON, st
 
     security/ingress/secrets/creds.json     # gitignored, never commit
 
-Get it from `cloudflared tunnel create <name>` (it lands in
-`~/.cloudflared/<TUNNEL_ID>.json`) and copy it here -- see docs/SETUP.md.
+Get it from the shared deploy/cloudflare Pulumi stack (docs/deploy/local.md
+step 3):
+
+    cd deploy/cloudflare
+    pulumi stack output credsJson --show-secrets > ../../security/ingress/secrets/creds.json
+
+The AWS path skips the manual staging -- its VM pulls the same JSON from SSM at
+boot (see deploy/aws/).
 
 Note: only one connector may run per tunnel. If a host `cloudflared` service already
 serves this tunnel, stop it before bringing up the overlay -- two connectors with

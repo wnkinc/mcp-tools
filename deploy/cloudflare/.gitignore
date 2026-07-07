@@ -1,0 +1,4 @@
+# Stack files hold per-deployment identity (account ids, encrypted secrets) --
+# each deployer keeps their own. Pulumi.yaml (the project file) stays committed.
+Pulumi.*.yaml
+venv/

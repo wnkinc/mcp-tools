@@ -4,7 +4,7 @@ Every public-facing tool server reuses :func:`build_oauth_provider` so that
 Claude (desktop / web / mobile) gets a spec-compliant OAuth 2.1 + PKCE flow with
 the correct discovery metadata and ``WWW-Authenticate`` header. This is the piece
 that lets a self-hosted server work with the claude.ai web/mobile custom
-connector (which a bare Cloudflare Access portal does not -- see docs/SETUP.md).
+connector (which a bare Cloudflare Access portal does not -- see docs/DEPLOY.md).
 
 Identity is Google, gated by a verified-email allowlist (fail closed). FastMCP's
 ``GoogleProvider`` on its own authenticates *any* Google account, which would

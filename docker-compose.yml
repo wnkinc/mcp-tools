@@ -8,8 +8,10 @@
 #
 # Every tool carries a compose profile named after itself; only the tools listed in
 # COMPOSE_PROFILES (root .env, or --profile flags) are built and started, so nobody
-# pulls a tool's image — lean's is 13GB — without opting in. The egress wall and
-# guardrail carry no profile: they are the shared substrate and always run.
+# pulls a tool's image — lean's is 13GB — without opting in. The guardrail rides the
+# same mechanism (profile "guardrail", on by default in env.example; provider chosen
+# by GUARDRAIL_PROVIDER). The egress wall and approval sidecar carry no profile:
+# they are the shared substrate and always run.
 #
 # Security posture is chosen by env, not code (serve() reads it at startup): this base
 # file runs auth off (local dev) but the guardrail on. The docker-compose.tunnel.yml
@@ -31,21 +33,45 @@ services:
       - internal   # reachable by tools as http://egress:<port>
       - edge       # the only leg with internet -> performs the allowlisted CONNECTs
 
+  # Output screen for the untrusted tools (xmcp, telegram). Opt-in via the
+  # "guardrail" profile, like a tool; the provider behind /scan is env-chosen:
+  # llamafirewall (local model, default) or bedrock (AWS ApplyGuardrail). Turning
+  # it off = drop "guardrail" from COMPOSE_PROFILES + set GUARDRAIL_ENABLED=0
+  # (both in the root .env; the untrusted tools fail closed on a half-off state).
   guardrail:
     build: ./security/guardrail/service
     image: mcp-guardrail
+    profiles: ["guardrail"]
     restart: unless-stopped
     # No published port -- a true sidecar, reached over the network as http://guardrail:8071.
     environment:
       GUARDRAIL_HOST: 0.0.0.0
       GUARDRAIL_PORT: 8071
-      # Supply a token + mount the cache below to load the gated model; otherwise the
-      # service comes up degraded and says so on /healthz.
+      GUARDRAIL_PROVIDER: ${GUARDRAIL_PROVIDER:-llamafirewall}
+      # llamafirewall: HF token for the gated PromptGuard model — first start pulls
+      # it through the egress wall into the cache volume; empty token = degraded
+      # (HiddenASCII-only), stated on /healthz.
       HF_TOKEN: ${HF_TOKEN:-}
+      # bedrock: the Guardrail to call + where; credentials come from the instance
+      # role (cloud) or mounted AWS env. The deploy/aws stack fills these in.
+      BEDROCK_GUARDRAIL_ID: ${BEDROCK_GUARDRAIL_ID:-}
+      BEDROCK_GUARDRAIL_VERSION: ${BEDROCK_GUARDRAIL_VERSION:-DRAFT}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      # Both providers' outbound traffic (HF pull / Bedrock API) leaves through the
+      # egress wall on the guardrail's own allowlisted listener. That includes the
+      # EC2 instance-metadata credential endpoint on cloud deploys: the sealed
+      # internal network has no route to link-local, so squid carries IMDS on a
+      # pinned allow (see squid.compose.conf).
+      HTTPS_PROXY: http://egress:3133
+      HTTP_PROXY: http://egress:3133
+      NO_PROXY: localhost,127.0.0.1
     volumes:
-      - guardrail-hf-cache:/app/.cache/huggingface   # persist / supply the model cache (optional)
+      - guardrail-hf-cache:/app/.cache/huggingface   # persist the model cache across restarts
     networks:
-      - internal   # internal-only: no external egress (degraded without a model)
+      - internal   # egress only via the wall (listener 3133, allowlist/guardrail.txt)
+    depends_on:
+      egress:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8071/healthz',timeout=3)"]
       interval: 30s
@@ -110,7 +136,9 @@ services:
       MCP_REQUIRE_APPROVAL: "0"
       MCP_UNTRUSTED_OUTPUT: "1"
       GUARDRAIL_URL: http://guardrail:8071
-      GUARDRAIL_ENABLED: "1"
+      # Screening on/off travels with the guardrail profile (root .env sets both);
+      # with screening on and the service absent/unhealthy, results are WITHHELD.
+      GUARDRAIL_ENABLED: ${GUARDRAIL_ENABLED:-1}
       APPROVAL_URL: http://approval:8072
       # All outbound HTTPS is forced through the egress proxy; NO_PROXY keeps sideways +
       # loopback traffic direct (the sidecars, localhost, the Docker resolver).
@@ -124,6 +152,7 @@ services:
     depends_on:
       guardrail:
         condition: service_healthy   # wait for the screener before starting
+        required: false              # profile-gated: absent guardrail = start anyway
       approval:
         condition: service_started
       egress:
@@ -211,7 +240,7 @@ services:
       MCP_REQUIRE_APPROVAL: "0"
       MCP_UNTRUSTED_OUTPUT: "1"
       GUARDRAIL_URL: http://guardrail:8071
-      GUARDRAIL_ENABLED: "1"
+      GUARDRAIL_ENABLED: ${GUARDRAIL_ENABLED:-1}
       APPROVAL_URL: http://approval:8072
       TELEGRAM_PROXY_TYPE: http
       TELEGRAM_PROXY_HOST: egress
@@ -226,6 +255,7 @@ services:
     depends_on:
       guardrail:
         condition: service_healthy   # wait for the screener before starting
+        required: false              # profile-gated: absent guardrail = start anyway
       approval:
         condition: service_started
       egress:

@@ -1,0 +1,5 @@
+# Pulumi program deps. cloudflare is pinned to the major version this program's
+# resource names target (v6 renames Tunnel/Record; bump deliberately).
+pulumi>=3.130,<4
+pulumi-cloudflare>=5.49,<6
+pulumi-random>=4.16,<5

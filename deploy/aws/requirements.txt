@@ -1,0 +1,4 @@
+# Pulumi program deps. The Cloudflare ingress lives in deploy/cloudflare (consumed
+# here via StackReference), so this stack needs only the AWS provider.
+pulumi>=3.130,<4
+pulumi-aws>=6.50,<7

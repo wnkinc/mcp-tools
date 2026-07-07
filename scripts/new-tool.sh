@@ -166,9 +166,7 @@ Finish wiring it (all in-repo):
            environment:
              MCP_AUTH_ENABLED: "1"
              MCP_PUBLIC_URL: https://${NAME}.\${MCP_DOMAIN}
-     DNS: already covered if you created the wildcard record (docs/SETUP.md).
-     Per-tool records instead? Don't skip this or the connector can't resolve:
-         cloudflared tunnel route dns <TUNNEL_ID> ${SUBDOMAIN}
+     DNS: already covered by the wildcard record the deploy/cloudflare stack owns.
      Route changes apply on cloudflared RECREATE (config renders at up), and a
      changed squid.compose.conf needs an egress RESTART (single-file bind mounts
      go stale on git pull):

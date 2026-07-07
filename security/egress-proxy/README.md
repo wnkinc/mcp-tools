@@ -20,9 +20,11 @@ xmcp (internal net, no gateway) ──HTTPS_PROXY──▶ egress:3128 ──all
 ```
 
 ## Files
-- `squid.compose.conf` — the sidecar's config: per-tool listeners (`3128` x-mcp /
-  `3129` data / `3130` lean), default-deny. Mounted read-only into the `egress` service.
-- `allowlist/<tool>.txt` — that tool's allowed domains, mounted at `/etc/squid/allowlist/`.
+- `squid.compose.conf` — the sidecar's config: one listener per service (`3128` x-mcp /
+  `3129` data / `3130` lean / `3131` telegram / `3132` approval / `3133` guardrail),
+  default-deny. Mounted read-only into the `egress` service.
+- `allowlist/<service>.txt` — that service's allowed domains, mounted at
+  `/etc/squid/allowlist/`.
 
 ## Adding a tool
 `scripts/new-tool.sh` prints the exact block: one `http_port <port> name=<tool>` + an
@@ -39,7 +41,10 @@ docker compose exec egress tail -f /var/log/squid/access.log   # watch TCP_DENIE
 ```
 
 ## Scope / limits
-- CONNECT-domain level only — not payload inspection.
-- Allowlist per tool is the union of that tool's needs.
-- The guardrail sidecar (`:8071`) is internal-only; give it an allowlisted egress leg if
-  its HuggingFace model pull needs the network.
+- CONNECT-domain level only — not payload inspection. One deliberate exception: the
+  guardrail listener carries plain-HTTP to the EC2 instance-metadata address
+  (169.254.169.254) so boto3 can fetch instance-role credentials on cloud deploys —
+  pinned to that listener + that one link-local IP.
+- Allowlist per tool is the union of that tool's needs. The guardrail's own leg
+  (`:3133`) covers its two providers: the HuggingFace model pull and the region's
+  `bedrock-runtime` endpoint.

@@ -1,0 +1,11 @@
+# guardrail sidecar egress allowlist (squid dstdomain). One host per line; a
+# leading dot matches subdomains. Two jobs, one per provider:
+#
+#   llamafirewall — pull the gated PromptGuard model from Hugging Face on first
+#                   start (HF_TOKEN set). After the model is cached in the
+#                   guardrail-hf-cache volume, scans run fully offline.
+#   bedrock       — call the ApplyGuardrail API. Region-specific endpoint: keep
+#                   this line matching the AWS_REGION you deploy in.
+.huggingface.co
+.xethub.hf.co
+bedrock-runtime.us-east-1.amazonaws.com

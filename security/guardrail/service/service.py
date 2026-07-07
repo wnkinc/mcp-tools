@@ -1,14 +1,31 @@
 """Guardrail service.
 
-A thin FastAPI wrapper around LlamaFirewall. Consumers POST text to /scan and act on
-the decision. Heavy deps (torch/transformers + the gated PromptGuard model) stay
-isolated in this service's own venv.
+A thin FastAPI wrapper around a prompt-injection screen. Consumers POST text to
+/scan and act on the decision; the screening engine behind it is chosen by env:
 
-Scanners:
-  - PROMPT_GUARD  — BERT injection classifier (HF-gated Meta model). Main detector.
-  - HIDDEN_ASCII  — catches Unicode-smuggled / invisible-text injection. No model,
-                    so the service still provides *some* protection (degraded mode)
-                    before the gated PromptGuard model is available.
+  GUARDRAIL_PROVIDER=llamafirewall  (default — the local-model path)
+      LlamaFirewall in-process:
+        - PROMPT_GUARD  — BERT injection classifier (HF-gated Meta model). Main
+                          detector. Downloads into HF_HOME on first start when
+                          HF_TOKEN is set (through the egress wall); until the
+                          model is present the service runs DEGRADED.
+        - HIDDEN_ASCII  — catches Unicode-smuggled / invisible-text injection.
+                          Model-free, so degraded mode still provides *some*
+                          protection.
+      Heavy deps (torch/transformers + the gated model) stay isolated in this
+      service's own venv.
+
+  GUARDRAIL_PROVIDER=bedrock  (the cloud path)
+      Amazon Bedrock Guardrails via the ApplyGuardrail API (prompt-attack
+      filter). Needs BEDROCK_GUARDRAIL_ID (+ optional BEDROCK_GUARDRAIL_VERSION,
+      default DRAFT), AWS_REGION, and AWS credentials from the environment /
+      instance role. A warmup call at startup validates all of that loudly:
+      a misconfigured screen crash-loops (container stays unhealthy) instead of
+      silently passing content. Oversized content that the API rejects surfaces
+      as a scan error — consumers fail closed on it.
+
+The /scan contract (decision/score/reason/degraded) is identical across
+providers, so GuardrailMiddleware in the tools is provider-blind.
 
 AlignmentCheck (AGENT_ALIGNMENT) is intentionally NOT wired here yet — deferred
 pending a vendor decision.
@@ -21,62 +38,144 @@ import os
 from contextlib import asynccontextmanager
 
 import anyio
-import huggingface_hub
-from fastapi import FastAPI
-
-if not hasattr(huggingface_hub, "HfFolder"):
-    # huggingface_hub 1.0 removed HfFolder, but llamafirewall 1.0.3 still imports it
-    # (scanners/promptguard_utils.py) — and we need hub >= 1.0 for transformers >= 5.3.0
-    # (RCE fix, see pyproject). Only get_token() is ever called, and only on a cache
-    # miss. Drop this shim when llamafirewall > 1.0.3 supports hub 1.x.
-    class _HfFolder:
-        get_token = staticmethod(huggingface_hub.get_token)
-
-    huggingface_hub.HfFolder = _HfFolder  # type: ignore[attr-defined]
-
-from llamafirewall import (  # noqa: E402
-    LlamaFirewall,
-    Role,
-    ScannerType,
-    UserMessage,
-)
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("guardrail")
 
-# Mutable service state, populated at startup.
-STATE: dict = {"lf": None, "scanners": [], "prompt_guard_loaded": False, "degraded": True}
+
+class ScanResult(BaseModel):
+    decision: str  # "allow" | "block" | "human_in_the_loop_required"
+    score: float
+    reason: str | None = None
+    degraded: bool  # True => the main detector is unavailable; a weaker screen ran
 
 
-def _build_warm(scanners: list[ScannerType]) -> LlamaFirewall:
-    """Build a firewall and force the lazy scanners to actually load by running a
-    throwaway warmup scan — LlamaFirewall instantiates scanners on first scan, not
-    at construction, so this is the only way to detect a broken/gated model early."""
-    lf = LlamaFirewall(scanners={Role.USER: scanners})
-    lf.scan(UserMessage(content="warmup"))
-    return lf
+# ---------------------------------------------------------------------------------
+# Provider: llamafirewall (local model)
+# ---------------------------------------------------------------------------------
+class LlamaFirewallProvider:
+    """LlamaFirewall PromptGuard + HiddenASCII; degrades to HiddenASCII-only if the
+    gated PromptGuard model can't load (access pending / cache empty / dep issue)."""
+
+    name = "llamafirewall"
+
+    def __init__(self) -> None:
+        import huggingface_hub
+
+        if not hasattr(huggingface_hub, "HfFolder"):
+            # huggingface_hub 1.0 removed HfFolder, but llamafirewall 1.0.3 still
+            # imports it (scanners/promptguard_utils.py) — and we need hub >= 1.0 for
+            # transformers >= 5.3.0 (RCE fix, see pyproject). Only get_token() is ever
+            # called, and only on a cache miss. Drop this shim when llamafirewall
+            # > 1.0.3 supports hub 1.x.
+            class _HfFolder:
+                get_token = staticmethod(huggingface_hub.get_token)
+
+            huggingface_hub.HfFolder = _HfFolder  # type: ignore[attr-defined]
+
+        from llamafirewall import LlamaFirewall, Role, ScannerType, UserMessage
+
+        self._Role, self._UserMessage = Role, UserMessage
+
+        def build_warm(scanners: list) -> LlamaFirewall:
+            # LlamaFirewall instantiates scanners on first scan, not at construction,
+            # so a throwaway warmup scan is the only way to detect a broken/gated
+            # model early.
+            lf = LlamaFirewall(scanners={Role.USER: scanners})
+            lf.scan(UserMessage(content="warmup"))
+            return lf
+
+        try:
+            self._lf = build_warm([ScannerType.PROMPT_GUARD, ScannerType.HIDDEN_ASCII])
+            self.scanners = ["prompt_guard", "hidden_ascii"]
+            self.degraded = False
+            log.info("guardrail ready: PromptGuard + HiddenASCII")
+        except Exception as exc:  # gated model missing / not logged in / dep mismatch
+            log.warning("PromptGuard unavailable (%s) — DEGRADED to HiddenASCII-only", exc)
+            self._lf = build_warm([ScannerType.HIDDEN_ASCII])
+            self.scanners = ["hidden_ascii"]
+            self.degraded = True
+
+    def scan(self, text: str) -> ScanResult:
+        result = self._lf.scan(self._UserMessage(content=text))
+        return ScanResult(
+            decision=result.decision.value,
+            score=float(getattr(result, "score", 0.0) or 0.0),
+            reason=getattr(result, "reason", None),
+            degraded=self.degraded,
+        )
 
 
-def _build_firewall() -> None:
-    """Prefer PromptGuard + HiddenASCII; degrade to HiddenASCII-only if the
-    PromptGuard model can't load (gated/uncached/dep issue)."""
-    try:
-        STATE.update(
-            lf=_build_warm([ScannerType.PROMPT_GUARD, ScannerType.HIDDEN_ASCII]),
-            scanners=["prompt_guard", "hidden_ascii"],
-            prompt_guard_loaded=True,
+# ---------------------------------------------------------------------------------
+# Provider: bedrock (AWS API)
+# ---------------------------------------------------------------------------------
+class BedrockProvider:
+    """Amazon Bedrock Guardrails ApplyGuardrail. GUARDRAIL_INTERVENED maps to block;
+    filter confidences map to the score. Reaches AWS through the egress wall
+    (HTTPS_PROXY), credentials come from the instance role / environment."""
+
+    name = "bedrock"
+    scanners = ["bedrock_guardrail"]
+    degraded = False
+
+    _CONFIDENCE = {"NONE": 0.0, "LOW": 0.33, "MEDIUM": 0.66, "HIGH": 1.0}
+
+    def __init__(self) -> None:
+        import boto3
+
+        guardrail_id = os.environ.get("BEDROCK_GUARDRAIL_ID")
+        if not guardrail_id:
+            raise RuntimeError("GUARDRAIL_PROVIDER=bedrock requires BEDROCK_GUARDRAIL_ID")
+        self._id = guardrail_id
+        self._version = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "DRAFT")
+        self._client = boto3.client(
+            "bedrock-runtime",
+            region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"),
+        )
+        # Warmup: validates credentials, region, guardrail id/version, and the egress
+        # path in one call — a broken screen fails at startup, visibly.
+        self.scan("warmup")
+        log.info("guardrail ready: Bedrock Guardrail %s (version %s)", self._id, self._version)
+
+    def scan(self, text: str) -> ScanResult:
+        resp = self._client.apply_guardrail(
+            guardrailIdentifier=self._id,
+            guardrailVersion=self._version,
+            # The screened text is content headed INTO a model turn, and Bedrock
+            # evaluates prompt-attack filters on INPUT-sourced content only.
+            source="INPUT",
+            content=[{"text": {"text": text}}],
+        )
+        intervened = resp.get("action") == "GUARDRAIL_INTERVENED"
+        score, reasons = 0.0, []
+        for assessment in resp.get("assessments", []):
+            for f in assessment.get("contentPolicy", {}).get("filters", []):
+                score = max(score, self._CONFIDENCE.get(f.get("confidence"), 0.0))
+                if f.get("action") == "BLOCKED":
+                    reasons.append(f.get("type", "?"))
+        return ScanResult(
+            decision="block" if intervened else "allow",
+            score=score if intervened else 0.0,
+            reason=", ".join(reasons) or None if intervened else None,
             degraded=False,
         )
-        log.info("guardrail ready: PromptGuard + HiddenASCII")
-    except Exception as exc:  # gated model missing / not logged in / dep mismatch
-        log.warning("PromptGuard unavailable (%s) — DEGRADED to HiddenASCII-only", exc)
-        STATE.update(
-            lf=_build_warm([ScannerType.HIDDEN_ASCII]),
-            scanners=["hidden_ascii"],
-            prompt_guard_loaded=False,
-            degraded=True,
+
+
+PROVIDERS = {"llamafirewall": LlamaFirewallProvider, "bedrock": BedrockProvider}
+
+# Mutable service state, populated at startup.
+STATE: dict = {"provider": None}
+
+
+def _build_provider() -> None:
+    name = os.environ.get("GUARDRAIL_PROVIDER", "llamafirewall").strip().lower()
+    if name not in PROVIDERS:
+        raise RuntimeError(
+            f"unknown GUARDRAIL_PROVIDER {name!r} (expected one of {sorted(PROVIDERS)})"
         )
+    STATE["provider"] = PROVIDERS[name]()
 
 
 @asynccontextmanager
@@ -84,11 +183,11 @@ async def lifespan(_app: FastAPI):
     # LlamaFirewall.scan() spins its own event loop (asyncio.run), so it must NOT
     # run inside this async lifespan — warm up in a worker thread, exactly how the
     # sync /scan endpoint will execute it.
-    await anyio.to_thread.run_sync(_build_firewall)
+    await anyio.to_thread.run_sync(_build_provider)
     yield
 
 
-app = FastAPI(title="guardrail-service", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="guardrail-service", version="0.2.0", lifespan=lifespan)
 
 
 class ScanRequest(BaseModel):
@@ -96,32 +195,23 @@ class ScanRequest(BaseModel):
     role: str = "user"  # reserved; today everything is screened as untrusted user content
 
 
-class ScanResponse(BaseModel):
-    decision: str  # "allow" | "block" | "human_in_the_loop_required"
-    score: float
-    reason: str | None = None
-    degraded: bool  # True => PromptGuard not loaded; only HiddenASCII ran
-
-
 @app.get("/healthz")
 def healthz() -> dict:
+    provider = STATE["provider"]
     return {
-        "ready": STATE["lf"] is not None,
-        "scanners": STATE["scanners"],
-        "prompt_guard_loaded": STATE["prompt_guard_loaded"],
-        "degraded": STATE["degraded"],
+        "ready": provider is not None,
+        "provider": getattr(provider, "name", None),
+        "scanners": getattr(provider, "scanners", []),
+        "degraded": getattr(provider, "degraded", True),
     }
 
 
-@app.post("/scan", response_model=ScanResponse)
-def scan(req: ScanRequest) -> ScanResponse:
-    result = STATE["lf"].scan(UserMessage(content=req.text))
-    return ScanResponse(
-        decision=result.decision.value,
-        score=float(getattr(result, "score", 0.0) or 0.0),
-        reason=getattr(result, "reason", None),
-        degraded=STATE["degraded"],
-    )
+@app.post("/scan", response_model=ScanResult)
+def scan(req: ScanRequest) -> ScanResult:
+    provider = STATE["provider"]
+    if provider is None:  # startup still warming — consumers fail closed on the 503
+        raise HTTPException(status_code=503, detail="provider warming up")
+    return provider.scan(req.text)
 
 
 def main() -> None:

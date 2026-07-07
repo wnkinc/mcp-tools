@@ -1,0 +1,10 @@
+name: mcp-tools-cloudflare
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: >-
+  The stack's ingress identity, shared by every deployment path: one Cloudflare
+  Tunnel + one wildcard DNS record. Local deploys write the credsJson output to
+  security/ingress/secrets/creds.json; the AWS stack consumes both outputs via a
+  StackReference. Runbooks: docs/deploy/local.md, docs/deploy/aws.md.

@@ -1,10 +1,12 @@
 [project]
 name = "guardrail-service"
-version = "0.1.0"
-description = "Layer-4 guardrail service: LlamaFirewall PromptGuard + HiddenASCII injection screen over loopback (:8041). THREAT-MODEL.md Layer 4 (detect leg)."
+version = "0.2.0"
+description = "Layer-4 guardrail service: prompt-injection screen with a provider switch — LlamaFirewall PromptGuard + HiddenASCII (local model) or Amazon Bedrock Guardrails (ApplyGuardrail). THREAT-MODEL.md Layer 4 (detect leg)."
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "llamafirewall==1.0.3",
+    # The bedrock provider's only extra dependency; a rounding error next to torch.
+    "boto3>=1.35",
     # Security floor: transformers < 5.3.0 has an RCE via attacker-crafted model config
     # (GHSA-29pf-2h5f-8g72). transformers 5.x needs huggingface_hub >= 1.0, which
     # removed the `HfFolder` that llamafirewall 1.0.3 still imports — service.py shims
