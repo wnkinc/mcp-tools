@@ -18,3 +18,6 @@ env/
 security/ingress/secrets/
 
 vendor/
+
+# Claude Code local (per-machine) settings; the deploy skill in .claude/skills IS committed.
+.claude/settings.local.json
