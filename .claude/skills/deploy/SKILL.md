@@ -1,0 +1,114 @@
+---
+name: deploy
+description: Drive a deployment of this stack end-to-end — local box or AWS VM, behind Cloudflare Tunnel with Google OAuth. Use when the user says "deploy this", "set this up", "make this public", "put this on AWS", or asks to stand up / go live with the MCP tools. Claude does every step it can; the user only decides, approves spend, and does the account/browser steps.
+---
+
+# Deploy this stack
+
+You are driving the deployment. The user is the approver and does only the
+steps that genuinely require a human (owning accounts, minting tokens,
+approving spend). Everything else — installing CLIs, Pulumi stacks, watching
+boot logs, writing env files, verification — is your job. Do not hand the
+user a list of commands to run; run them.
+
+**Source of truth:** `docs/DEPLOY.md` (the chooser) and the runbook it picks —
+`docs/deploy/local.md` or `docs/deploy/aws.md`. Read the chooser and the
+chosen runbook fully before acting. This skill is protocol (who does what,
+when to stop); the runbooks own the actual commands. If this file and a
+runbook disagree on a command, the runbook wins.
+
+## Phase 0 — decisions (one question round)
+
+Ask the user, in a single round, the decisions `docs/DEPLOY.md` lists:
+
+1. **Path** — local box or AWS.
+2. **Tools** — xmcp, data, lean, telegram (lean requires data and, on AWS,
+   a bigger disk — check the runbook's sizing note).
+3. **Guardrail** — default to the path's natural provider (llamafirewall
+   local, bedrock on AWS). Only surface this if they ask or pick tools that
+   don't need it.
+
+## Phase 1 — preflight
+
+**You check and install tooling.** Detect what's already present before
+installing anything (`pulumi version`, `aws sts get-caller-identity`,
+`docker --version`, `session-manager-plugin` — per the runbook's prereq
+list). Install what's missing yourself; tell the user what you installed.
+
+**Then give the user ONE short checklist** — only the deployment-level items
+a human must produce, nothing else:
+
+- A **domain on Cloudflare** (free plan is fine) and, from its zone Overview
+  page, the **Zone ID** and **Account ID**.
+- A **Cloudflare API token** with `Cloudflare Tunnel:Edit` + `DNS:Edit` on
+  that zone.
+- **AWS path only:** working AWS credentials on this machine. If they need to
+  log in interactively, have them run it themselves with the `!` prefix
+  (e.g. `! aws configure` or `! aws sso login`).
+
+Do **not** ask for per-tool API keys or the Google OAuth client here. Those
+belong to later runbook steps and you only collect them for the tools the
+user actually picked, when the runbook reaches them.
+
+## Human-step protocol
+
+When the runbook hits a step only the user can do (Cloudflare dashboard,
+Google Cloud console, buying a domain):
+
+- Give the exact click-path from the runbook and say precisely which values
+  you need back (names, not secrets, in chat — see below).
+- If the user is stuck, offer to help directly: with the Claude Chrome
+  extension connected, you can navigate the browser with them and do or
+  verify the clicks. Mention this option; don't assume it's available.
+- Where possible, parallelize: e.g. the Google OAuth client (AWS runbook
+  step 4) can be created while the VM's first boot is still building images.
+
+## Secrets protocol
+
+- Prefer that secrets never enter the chat: the user can run the command
+  themselves with the `!` prefix (`! pulumi config set --secret ...`) or
+  edit the `.env` file in their own editor while you wait.
+- **But do not refuse pasted secrets.** Some users will want to do
+  everything in the chat. Say once that pasting a secret into the
+  conversation is not recommended (it persists in the conversation history)
+  — then, if they paste it anyway, use it: put it exactly where the runbook
+  says (`.env`, `pulumi config set --secret`), never repeat it back, never
+  echo it in command output, and move on. It works; it's just not the
+  recommended route.
+- Never commit a secret. Never print one in logs or summaries.
+
+## Spend gate
+
+Before any command that creates billable resources (on AWS: `pulumi up` in
+`deploy/aws`), state plainly what will be created and the recurring cost from
+the runbook, and get an explicit yes. The Cloudflare ingress stack and
+`pulumi preview` need no gate — they're free/read-only.
+
+## Execution
+
+- Follow the chosen runbook top to bottom. Announce each numbered step as
+  you start it.
+- After each step, run the runbook's verification (or the obvious one:
+  `pulumi stack output`, `docker compose ps`, the `curl ... WWW-Authenticate`
+  check) and show the user the evidence before moving on. Never advance past
+  a failed check — use the runbook's Troubleshooting section first.
+- On AWS, first boot takes several minutes: watch it for real over the SSM
+  session (`cloud-init-output.log`, then `docker compose ps`) rather than
+  assuming it worked.
+- Per-tool secrets step: read `tools/<tool>/env.example` for each chosen
+  tool and collect only those values, following the secrets protocol above.
+
+## Finish
+
+- Run the verification curl for every deployed tool and show the
+  `WWW-Authenticate` proof.
+- Give the user the connector URLs and walk them through Claude → Settings →
+  Connectors → Add custom connector → Google login.
+- Tell them the two day-2 commands that matter: how to update the deployment
+  and how to tear it down (`Day 2` section of the runbook).
+
+## If the docs are wrong
+
+If a runbook step fails, is out of order, or misled you, note it, work
+around it, and keep going. At the end, list every doc problem you hit so it
+can be fixed — the runbooks are meant to survive exactly this kind of run.

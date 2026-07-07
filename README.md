@@ -19,13 +19,29 @@ desktop, web, and mobile.
 
 ## Quick start
 
+```bash
+git clone https://github.com/wnkinc/claude-custom-connector-server.git mcp-tools
+cd mcp-tools
+claude        # then say: "deploy this"
 ```
-cp env.example .env   # pick your tools: COMPOSE_PROFILES=xmcp,data,guardrail,...
-docker compose up --build                                               # local dev (auth off)
 
-# public: docs/deploy/local.md (your box) or docs/deploy/aws.md (pulumi up)
-docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d  # public (auth on)
-```
+Claude drives the whole deployment — it reads the runbooks, does every step it
+can itself, and stops only where you're needed (accounts, tokens, approving
+spend).
+
+**Not a terminal person?** Use
+[Claude Cowork](https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork)
+(the Claude desktop app's agent workspace) instead: point it at the cloned
+folder — or just ask it to clone this repo for you — and say **"deploy this"**.
+The repo's deploy skill is picked up there the same as in the terminal.
+(Windows: keep the folder under `C:\Users\<you>\`.) With the
+[Claude Chrome extension](https://support.claude.com/en/articles/12012173-get-started-with-claude-in-chrome)
+connected, Claude can also help you click through the browser-only steps
+(Cloudflare dashboard, Google Cloud console).
+
+Driving it yourself instead? **[docs/DEPLOY.md](docs/DEPLOY.md)** is the
+chooser; it links the step-by-step runbook for each path
+([local](docs/deploy/local.md), [AWS](docs/deploy/aws.md)).
 
 Each tool is opt-in via a compose profile named after it — only the tools in
 `COMPOSE_PROFILES` are built and started, so you never pull an image (lean's is
