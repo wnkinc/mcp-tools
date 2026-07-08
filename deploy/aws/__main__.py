@@ -197,19 +197,24 @@ def _user_data(a: dict) -> str:
         env.append("GUARDRAIL_PROVIDER=llamafirewall")
     env_body = "\n".join(env)
 
+    # SSM reads go through python3-boto3: Ubuntu 24.04 dropped the `awscli` apt
+    # package, and the v2 bundle would mean curl|unzip-ing an installer at boot.
+    ssm_read = (
+        "python3 -c \"import boto3; print(boto3.client('ssm', region_name='{region}')"
+        ".get_parameter(Name='{name}', WithDecryption=True)['Parameter']['Value'])\""
+    )
+
     hf_fetch = ""
     if a["hf_param"]:
         hf_fetch = (
-            f'echo "HF_TOKEN=$(aws ssm get-parameter --name {a["hf_param"]} '
-            f"--with-decryption --region {region} "
-            f'--query Parameter.Value --output text)" >> .env\n'
+            f'echo "HF_TOKEN=$({ssm_read.format(region=region, name=a["hf_param"])})" >> .env\n'
         )
 
     return f"""#!/bin/bash
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -yq docker.io docker-compose-v2 git awscli
+apt-get install -yq docker.io docker-compose-v2 git python3-boto3
 systemctl enable --now docker
 
 git clone --depth 1 --branch {repo_ref} {repo_url} /opt/mcp-tools
@@ -220,8 +225,8 @@ sed -i -E 's/bedrock-runtime\\.[a-z0-9-]+\\.amazonaws\\.com/bedrock-runtime.{reg
 
 # Tunnel credentials: SSM -> the gitignored path the compose overlay mounts.
 mkdir -p security/ingress/secrets
-aws ssm get-parameter --name {a["creds_param"]} --with-decryption --region {region} \\
-  --query Parameter.Value --output text > security/ingress/secrets/creds.json
+{ssm_read.format(region=region, name=a["creds_param"])} \\
+  > security/ingress/secrets/creds.json
 chown 1000:1000 security/ingress/secrets/creds.json
 chmod 600 security/ingress/secrets/creds.json
 

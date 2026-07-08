@@ -3,8 +3,8 @@ runtime:
   name: python
   options:
     virtualenv: venv
+# Pulumi Cloud copies this into a stack tag capped at 256 chars — keep it short.
 description: >-
-  Cloud deployment of the mcp-tools stack: one EC2 VM running the same
-  docker-compose stack as a local deploy, fronted by a Cloudflare Tunnel this
-  program creates, with a Bedrock Guardrail as the default output screen.
-  Full runbook: docs/deploy/aws.md.
+  One EC2 VM running the same docker-compose stack as a local deploy, behind
+  the shared Cloudflare Tunnel, with a Bedrock Guardrail as the default
+  output screen. Full runbook: docs/deploy/aws.md.

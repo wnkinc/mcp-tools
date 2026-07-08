@@ -3,8 +3,8 @@ runtime:
   name: python
   options:
     virtualenv: venv
+# Pulumi Cloud copies this into a stack tag capped at 256 chars — keep it short.
 description: >-
-  The stack's ingress identity, shared by every deployment path: one Cloudflare
-  Tunnel + one wildcard DNS record. Local deploys write the credsJson output to
-  security/ingress/secrets/creds.json; the AWS stack consumes both outputs via a
-  StackReference. Runbooks: docs/deploy/local.md, docs/deploy/aws.md.
+  Shared ingress identity for every deployment path: one Cloudflare Tunnel +
+  one wildcard DNS record. Consumed by local deploys (credsJson) and the AWS
+  stack (StackReference). Runbooks: docs/deploy/{local,aws}.md.
