@@ -17,6 +17,38 @@ chosen runbook fully before acting. This skill is protocol (who does what,
 when to stop); the runbooks own the actual commands. If this file and a
 runbook disagree on a command, the runbook wins.
 
+## Execution environment (decide silently; never ask)
+
+Notice where you are running before Phase 0. The user is never asked about
+any of this — it changes what *you* do, not what they decide.
+
+- **User's machine** (Claude Code in a terminal): everything below applies
+  as written, including the `!` prefix for user-run commands.
+- **Hosted sandbox** (Cowork, Claude Code on the web): commands run in an
+  ephemeral VM that is not the user's machine and does not survive the
+  session.
+  - **Local path: stop.** The stack must run on the user's own box and you
+    cannot bring it up there from here. Say so, point them at Claude Code in
+    a terminal on the target machine, and offer the AWS path as the
+    alternative you *can* drive.
+  - **AWS path: fine** — the VM is created in AWS, not where you're standing
+    — but the Pulumi state rule below is mandatory, and the `!` prefix does
+    not exist here (the secrets protocol's "user runs it themselves" route
+    becomes "user puts the value in the file/console themselves").
+
+**Pulumi state — pick silently, never ask the user:**
+
+1. `pulumi whoami` succeeds → a backend is already configured; use it,
+   don't switch it.
+2. User's machine, no backend → `pulumi login --local`.
+3. Sandbox, AWS path → state must outlive the sandbox: create a small S3
+   bucket with the AWS credentials already in hand and
+   `pulumi login s3://<bucket>` **before** creating any resources. Never
+   sign the user up for Pulumi Cloud to solve this.
+
+Both stacks (`deploy/cloudflare` and `deploy/aws`) must live on the **same
+backend** — the AWS stack reads the ingress stack via a StackReference.
+
 ## Phase 0 — decisions (one question round)
 
 Ask the user, in a single round, the decisions `docs/DEPLOY.md` lists:
@@ -65,9 +97,17 @@ Google Cloud console, buying a domain):
 
 ## Secrets protocol
 
-- Prefer that secrets never enter the chat: the user can run the command
-  themselves with the `!` prefix (`! pulumi config set --secret ...`) or
-  edit the `.env` file in their own editor while you wait.
+This governs how you **ask**, not just how you react to a paste.
+
+- Split every request into public identifiers vs secrets. Client IDs,
+  account/zone IDs, emails, domains, instance IDs are fine in chat — ask
+  for those plainly. Client secrets, API keys, bearer tokens, session
+  strings are not; a Telegram session string is full account access.
+- When you need a secret, lead with the route that keeps it out of the
+  chat and make that the default ask: on the user's machine, the `!`
+  prefix (`! pulumi config set --secret ...`) or the user editing the
+  `.env` in their own editor while you wait. Never phrase it as "send me
+  the secret".
 - **But do not refuse pasted secrets.** Some users will want to do
   everything in the chat. Say once that pasting a secret into the
   conversation is not recommended (it persists in the conversation history)
