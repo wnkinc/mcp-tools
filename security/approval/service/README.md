@@ -14,14 +14,21 @@ Surfaces:
   decision are the two human channels below, so a compromised tool can't
   approve itself.
 - `GET/POST /approve/{token}` (public via the tunnel, capability token): the
-  approval page linked in chat.
+  approval page, linked from the Slack card as a fallback if the buttons fail.
 - `POST /slack/interact` (public via the tunnel, Slack-signature verified):
   the card's Approve/Deny buttons.
 - `GET /healthz`.
 
+Slack is the ONLY channel that reaches the human: the model-facing gate message
+is a bare pending status with no URL, because a tool result that asks the model
+to relay a link is indistinguishable from prompt injection and gets flagged or
+refused (claude.ai screening and the model both). `/gate` reports whether the
+card was delivered (`notified`), and the middleware fails loud when it wasn't —
+without working Slack values, gated actions cannot be approved at all.
+
 Setup: `cp env.example .env` and follow its Slack-app steps — including pointing
 the app's Interactivity Request URL at `https://approval.<MCP_DOMAIN>/slack/interact`
-(once, ever). Without Slack values the sidecar still gates via the page link.
+(once, ever).
 
 Tests: `pytest security` (service exercised in-process via Starlette's TestClient,
 middleware end-to-end against the real app over an ASGI transport).

@@ -80,7 +80,12 @@ The same image runs locally (`docker compose up`) and in the cloud — transport
   tokens, the approve page, and the Slack webhook. Tools only create/query their own
   approvals; decisions are written solely by the human channels (capability-URL page
   or Slack-signed webhook), so a compromised tool can't approve itself — and the
-  Slack bot token lives in exactly one container.
+  Slack bot token lives in exactly one container. The Slack card is the only surface
+  shown to the human: the model-facing pending message is a bare status with no URL,
+  because a tool result asking the model to relay a link is indistinguishable from
+  prompt injection and gets flagged or refused (the approve page is linked from the
+  card as a fallback, and the protocol is pre-declared in each gated server's MCP
+  instructions via `serve()`).
 
 - **Google OAuth with a verified-email allowlist, fail-closed.** `GoogleProvider`
   authenticates *any* Google account; `security/auth.py` wraps its token verifier to

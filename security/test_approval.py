@@ -35,37 +35,60 @@ PUBLIC = "https://approval.example.com"
 def clean(monkeypatch):
     svc._PENDING.clear()
     monkeypatch.setenv("APPROVAL_PUBLIC_URL", PUBLIC)
-    # Slack off: gate must work with the page link alone.
+    # Slack off by default: gate still creates approvals but reports notified=False
+    # (Slack is the only human channel now -- the chat never gets a link).
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     monkeypatch.delenv("SLACK_APPROVAL_CHANNEL", raising=False)
+
+
+@pytest.fixture
+def slack_ok(monkeypatch):
+    """Pretend the Slack card was delivered (the notified=True path)."""
+
+    async def _posted(token, action, source):
+        return True
+
+    monkeypatch.setattr(svc, "_slack_post_approval", _posted)
 
 
 def _gate(client, source="teltool", action="send_message(m='hi')", key="k1"):
     return client.post("/gate", json={"source": source, "action": action, "call_key": key}).json()
 
 
-def _token(data):
-    return data["approve_url"].rsplit("/", 1)[1]
+def _token(source="teltool", key="k1"):
+    """The pending record's capability token -- server state, never sent to the model."""
+    return next(t for t, r in svc._PENDING.items() if r["key"] == f"{source}\x00{key}")
+
+
+def _sole_token():
+    """The only pending approval's token (middleware call_keys are hashes)."""
+    (token,) = svc._PENDING
+    return token
 
 
 # --- the gate lifecycle --------------------------------------------------------------
 
 
-def test_gate_creates_then_reports_pending():
+def test_gate_creates_then_reports_pending(slack_ok):
     c = TestClient(svc.app)
     first = _gate(c)
-    assert first == {
-        "decision": "pending",
-        "created": True,
-        "approve_url": f"{PUBLIC}/approve/{_token(first)}",
-    }
+    # No approve_url in the model-facing response: the link lives on the Slack card only.
+    assert first == {"decision": "pending", "created": True, "notified": True}
     again = _gate(c)
-    assert again["created"] is False and _token(again) == _token(first)
+    assert again == {"decision": "pending", "created": False, "notified": True}
+    assert len(svc._PENDING) == 1  # same approval, not a new one per ask
+
+
+def test_gate_reports_undelivered_slack():
+    c = TestClient(svc.app)  # fixture default: Slack unconfigured
+    assert _gate(c)["notified"] is False
+    assert _gate(c) == {"decision": "pending", "created": False, "notified": False}
 
 
 def test_approve_allows_exactly_once():
     c = TestClient(svc.app)
-    token = _token(_gate(c))
+    _gate(c)
+    token = _token()
     page = c.get(f"/approve/{token}")
     assert page.status_code == 200 and "send_message" in page.text
     assert "Approved" in c.post(f"/approve/{token}", data={"decision": "approve"}).text
@@ -77,15 +100,16 @@ def test_approve_allows_exactly_once():
 
 def test_deny_reported_once_then_recreates():
     c = TestClient(svc.app)
-    token = _token(_gate(c))
-    c.post(f"/approve/{token}", data={"decision": "deny"})
+    _gate(c)
+    c.post(f"/approve/{_token()}", data={"decision": "deny"})
     assert _gate(c)["decision"] == "denied"
     assert _gate(c)["created"] is True  # consumed; next ask starts a fresh approval
 
 
 def test_get_of_the_page_never_decides():
     c = TestClient(svc.app)
-    token = _token(_gate(c))
+    _gate(c)
+    token = _token()
     c.get(f"/approve/{token}")
     c.get(f"/approve/{token}")
     assert _gate(c)["decision"] == "pending"
@@ -93,16 +117,17 @@ def test_get_of_the_page_never_decides():
 
 def test_approvals_are_scoped_per_tool():
     c = TestClient(svc.app)
-    a = _gate(c, source="xmcp", key="samekey")
+    _gate(c, source="xmcp", key="samekey")
     _gate(c, source="telegram", key="samekey")
-    c.post(f"/approve/{_token(a)}", data={"decision": "approve"})
+    c.post(f"/approve/{_token('xmcp', 'samekey')}", data={"decision": "approve"})
     assert _gate(c, source="xmcp", key="samekey")["decision"] == "allow"
     assert _gate(c, source="telegram", key="samekey")["decision"] == "pending"
 
 
 def test_pending_expires_after_ttl():
     c = TestClient(svc.app)
-    token = _token(_gate(c))
+    _gate(c)
+    token = _token()
     svc._PENDING[token]["created"] -= svc._TTL_SECONDS + 1
     assert _gate(c)["created"] is True  # old record pruned, new one minted
     assert c.get(f"/approve/{token}").status_code == 404
@@ -137,16 +162,16 @@ def _signed_interact(client, token, action_id, secret):
 def test_interact_rejects_bad_signature(monkeypatch):
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "real-secret")
     c = TestClient(svc.app)
-    token = _token(_gate(c))
-    assert _signed_interact(c, token, "approve", "wrong-secret").status_code == 403
+    _gate(c)
+    assert _signed_interact(c, _token(), "approve", "wrong-secret").status_code == 403
     assert _gate(c)["decision"] == "pending"
 
 
 def test_interact_approves_with_valid_signature(monkeypatch):
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "real-secret")
     c = TestClient(svc.app)
-    token = _token(_gate(c))
-    assert _signed_interact(c, token, "approve", "real-secret").status_code == 200
+    _gate(c)
+    assert _signed_interact(c, _token(), "approve", "real-secret").status_code == 200
     assert _gate(c)["decision"] == "allow"
 
 
@@ -175,21 +200,40 @@ async def _ran(_ctx):
     return "TOOL-RAN"
 
 
-def test_middleware_gates_then_allows_after_page_approval(monkeypatch):
+def _pending_text(mw):
+    return asyncio.run(mw.on_call_tool(_ctx(), _ran)).content[0].text
+
+
+def test_middleware_gates_then_allows_after_slack_approval(slack_ok, monkeypatch):
     mw = _middleware_against_service(monkeypatch)
-    first = asyncio.run(mw.on_call_tool(_ctx(), _ran))
-    text = first.content[0].text
-    assert "APPROVAL REQUIRED" in text and f"{PUBLIC}/approve/" in text
-    token = text.split(f"{PUBLIC}/approve/")[1].split()[0]
-    TestClient(svc.app).post(f"/approve/{token}", data={"decision": "approve"})
+    first = _pending_text(mw)
+    assert "NOT performed" in first and "Slack" in first
+    still = _pending_text(mw)
+    assert "still awaiting" in still
+    TestClient(svc.app).post(f"/approve/{_sole_token()}", data={"decision": "approve"})
     assert asyncio.run(mw.on_call_tool(_ctx(), _ran)) == "TOOL-RAN"
 
 
-def test_middleware_reports_denial(monkeypatch):
+def test_middleware_messages_carry_no_link_or_directives(slack_ok, monkeypatch):
+    # The injection-shaped patterns that got pending messages flagged and refused:
+    # a URL to relay, and instructions addressed to the assistant. Never again.
     mw = _middleware_against_service(monkeypatch)
-    first = asyncio.run(mw.on_call_tool(_ctx(), _ran))
-    token = first.content[0].text.split(f"{PUBLIC}/approve/")[1].split()[0]
-    TestClient(svc.app).post(f"/approve/{token}", data={"decision": "deny"})
+    for text in (_pending_text(mw), _pending_text(mw)):  # created, then still-pending
+        assert "http" not in text and "INSTRUCTIONS" not in text
+
+
+def test_middleware_fails_loud_when_slack_undelivered(monkeypatch):
+    # Slack unconfigured (fixture default): the human was never notified, so the
+    # model must be told approval CANNOT arrive -- not left waiting politely.
+    mw = _middleware_against_service(monkeypatch)
+    for text in (_pending_text(mw), _pending_text(mw)):  # created, then re-asked
+        assert "could not be delivered" in text and "NOT" in text
+
+
+def test_middleware_reports_denial(slack_ok, monkeypatch):
+    mw = _middleware_against_service(monkeypatch)
+    _pending_text(mw)
+    TestClient(svc.app).post(f"/approve/{_sole_token()}", data={"decision": "deny"})
     out = asyncio.run(mw.on_call_tool(_ctx(), _ran))
     assert "denied" in out.content[0].text
 

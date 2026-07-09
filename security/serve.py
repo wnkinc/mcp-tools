@@ -115,6 +115,21 @@ def serve(
         mcp.add_middleware(
             ApprovalMiddleware(exempt=_csv_set(os.getenv(approval_exempt_env)), source=mcp.name)
         )
+        # Pre-declare the approval protocol in the server-level instructions (a
+        # list-time, trusted channel) so a pending status arrives as expected
+        # behavior. Runtime tool output that explains itself reads as prompt
+        # injection -- to the model and to claude.ai's screening -- which is why the
+        # pending message itself is a bare status (see approval/middleware.py).
+        note = (
+            "Some tools on this server are gated behind out-of-band human approval: "
+            "instead of running, a gated call reports a pending status and an "
+            "Approve/Deny card for that exact action is posted to the user's Slack. "
+            "After the user approves it there, calling the same tool again with the "
+            "same arguments performs the action; if they deny it, that call reports "
+            "the denial. Undecided requests expire after 10 minutes, and a later call "
+            "posts a fresh card."
+        )
+        mcp.instructions = f"{mcp.instructions}\n\n{note}" if mcp.instructions else note
     if untrusted_output:
         mcp.add_middleware(GuardrailMiddleware(source=guardrail_source or mcp.name))
         # The guardrail nulls each result's structuredContent (screening replaces it with

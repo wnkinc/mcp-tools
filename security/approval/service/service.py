@@ -76,22 +76,22 @@ async def gate(request):  # type: ignore[no-untyped-def]
         if rec["status"] == "denied":
             _PENDING.pop(token, None)
             return JSONResponse({"decision": "denied"})
-        return JSONResponse(
-            {"decision": "pending", "created": False, "approve_url": _approve_link(token)}
-        )
+        return JSONResponse({"decision": "pending", "created": False, "notified": rec["notified"]})
 
     token = secrets.token_urlsafe(24)
-    _PENDING[token] = {
+    rec = {
         "key": key,
         "source": source,
         "action": action,
         "status": "pending",
         "created": time.time(),
     }
-    await _slack_post_approval(token, action, source)  # out-of-band push (best-effort)
-    return JSONResponse(
-        {"decision": "pending", "created": True, "approve_url": _approve_link(token)}
-    )
+    _PENDING[token] = rec
+    # Slack is the ONLY channel that reaches the human (no URL goes to the chat --
+    # links in tool output trip injection screening), so delivery is load-bearing:
+    # report it and let the middleware fail loud instead of waiting on a card nobody got.
+    rec["notified"] = await _slack_post_approval(token, action, source)
+    return JSONResponse({"decision": "pending", "created": True, "notified": rec["notified"]})
 
 
 # ---------------------------------------------------------------------------
@@ -171,17 +171,23 @@ async def approve_route(request):  # type: ignore[no-untyped-def]
 
 
 # ---------------------------------------------------------------------------
-# Slack as the out-of-band channel. All optional -- without SLACK_BOT_TOKEN /
-# SLACK_APPROVAL_CHANNEL the page link still works, Slack is just not notified.
+# Slack as THE out-of-band channel: the card is how the human learns an approval
+# exists (the chat gets a status only, never a link). The approval page is still
+# linked from the card as a fallback if the interactivity webhook is down.
 # ---------------------------------------------------------------------------
 def _slack_enabled() -> bool:
     return bool(os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APPROVAL_CHANNEL"))
 
 
-async def _slack_post_approval(token: str, action: str, source: str) -> None:
-    """Post an interactive Approve/Deny message to Slack. Best-effort (never raises)."""
+async def _slack_post_approval(token: str, action: str, source: str) -> bool:
+    """Post an interactive Approve/Deny message to Slack.
+
+    Returns True only when Slack accepted the message -- i.e. a human was actually
+    notified. Never raises: any failure is logged and reported as False so the gate
+    can tell the model the request did NOT reach anyone.
+    """
     if not _slack_enabled():
-        return
+        return False
     blocks = [
         {
             "type": "section",
@@ -208,6 +214,18 @@ async def _slack_post_approval(token: str, action: str, source: str) -> None:
             ],
         },
     ]
+    if os.getenv("APPROVAL_PUBLIC_URL"):
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"<{_approve_link(token)}|Open approval page> if the buttons fail",
+                    }
+                ],
+            }
+        )
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
@@ -222,8 +240,11 @@ async def _slack_post_approval(token: str, action: str, source: str) -> None:
         data = resp.json()
         if not data.get("ok"):
             log.error("Slack chat.postMessage failed: %s", data.get("error"))
+            return False
+        return True
     except Exception:  # noqa: BLE001
         log.exception("Slack approval post failed")
+        return False
 
 
 def _verify_slack_signature(timestamp: str, body: bytes, signature: str) -> bool:
