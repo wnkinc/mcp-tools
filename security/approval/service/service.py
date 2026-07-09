@@ -46,6 +46,37 @@ log = logging.getLogger("approval")
 _PENDING: dict[str, dict] = {}
 _TTL_SECONDS = 600  # approval links expire after 10 minutes
 
+# The out-of-band platform that delivers approval cards. Only "slack" is
+# implemented; "discord" and "telegram" are planned. NOTE for telegram: it must
+# never deliver approvals while the telegram TOOL is deployed -- that tool
+# operates the user's own account (read history + press_inline_button), so a
+# card the account can see is a card the model can approve itself.
+_PROVIDERS_IMPLEMENTED = {"slack"}
+_PROVIDERS_PLANNED = {"discord", "telegram"}
+
+
+def _provider() -> str:
+    return os.getenv("APPROVAL_PROVIDER", "slack").strip().lower()
+
+
+async def _notify(token: str, action: str, source: str) -> bool:
+    """Deliver the approval card via the configured provider.
+
+    Returns True only when a human was actually notified; an unknown or
+    not-yet-implemented provider fails closed (False => the gate reports the
+    approval as undeliverable).
+    """
+    provider = _provider()
+    if provider == "slack":
+        return await _slack_post_approval(token, action, source)
+    log.error(
+        "APPROVAL_PROVIDER=%r is not implemented (implemented: %s; planned: %s)",
+        provider,
+        sorted(_PROVIDERS_IMPLEMENTED),
+        sorted(_PROVIDERS_PLANNED),
+    )
+    return False
+
 
 def _prune() -> None:
     now = time.time()
@@ -87,10 +118,10 @@ async def gate(request):  # type: ignore[no-untyped-def]
         "created": time.time(),
     }
     _PENDING[token] = rec
-    # Slack is the ONLY channel that reaches the human (no URL goes to the chat --
+    # The card is the ONLY channel that reaches the human (no URL goes to the chat --
     # links in tool output trip injection screening), so delivery is load-bearing:
     # report it and let the middleware fail loud instead of waiting on a card nobody got.
-    rec["notified"] = await _slack_post_approval(token, action, source)
+    rec["notified"] = await _notify(token, action, source)
     return JSONResponse({"decision": "pending", "created": True, "notified": rec["notified"]})
 
 
@@ -304,10 +335,12 @@ async def slack_interact(request):  # type: ignore[no-untyped-def]
 
 
 async def healthz(request):  # type: ignore[no-untyped-def]
+    provider = _provider()
     return JSONResponse(
         {
-            "ok": True,
-            "slack": "enabled" if _slack_enabled() else "disabled",
+            "ok": provider in _PROVIDERS_IMPLEMENTED,
+            "provider": provider,
+            "channel": "configured" if _slack_enabled() else "unconfigured",
             "public_url_set": bool(os.getenv("APPROVAL_PUBLIC_URL")),
             "pending": len(_PENDING),
         }
@@ -327,6 +360,14 @@ app = Starlette(
 if __name__ == "__main__":
     import uvicorn
 
+    # Fail fast on a typo'd/unimplemented provider rather than booting a sidecar
+    # that silently reports every approval undeliverable.
+    if _provider() not in _PROVIDERS_IMPLEMENTED:
+        raise SystemExit(
+            f"APPROVAL_PROVIDER={_provider()!r} is not implemented "
+            f"(implemented: {sorted(_PROVIDERS_IMPLEMENTED)}; "
+            f"planned: {sorted(_PROVIDERS_PLANNED)})"
+        )
     uvicorn.run(
         app,
         host=os.getenv("APPROVAL_HOST", "127.0.0.1"),
