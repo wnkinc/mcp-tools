@@ -19,7 +19,13 @@ Surfaces:
   the card's Approve/Deny buttons.
 - `GET /healthz`.
 
-Slack is the ONLY channel that reaches the human: the model-facing gate message
+The card platform is selected by `APPROVAL_PROVIDER` (default `slack`; `discord`
+and `telegram` are planned — telegram must never deliver approvals while the
+telegram tool is deployed, since that tool operates the user's own account and
+could press Approve itself). An unimplemented provider fails closed: startup
+refuses it, and `/gate` reports every approval undeliverable.
+
+The card is the ONLY channel that reaches the human: the model-facing gate message
 is a bare pending status with no URL, because a tool result that asks the model
 to relay a link is indistinguishable from prompt injection and gets flagged or
 refused (claude.ai screening and the model both). `/gate` reports whether the

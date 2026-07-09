@@ -33,10 +33,13 @@ services:
 
   # The tools' secrets are already loaded by the base; this overlay flips posture on and
   # stamps each tool's public URL from MCP_DOMAIN (environment beats env_file).
+  # Approval defaults ON for the gated tools; a deploy that has no approval channel
+  # configured opts out explicitly with MCP_REQUIRE_APPROVAL=0 in the root .env
+  # (without a channel, gated calls just report the approval as undeliverable).
   xmcp:
     environment:
       MCP_AUTH_ENABLED: "1"
-      MCP_REQUIRE_APPROVAL: "1"
+      MCP_REQUIRE_APPROVAL: ${MCP_REQUIRE_APPROVAL:-1}
       MCP_UNTRUSTED_OUTPUT: "1"
       MCP_PUBLIC_URL: https://xmcp.${MCP_DOMAIN}
 
@@ -53,7 +56,7 @@ services:
   telegram:
     environment:
       MCP_AUTH_ENABLED: "1"
-      MCP_REQUIRE_APPROVAL: "1"
+      MCP_REQUIRE_APPROVAL: ${MCP_REQUIRE_APPROVAL:-1}
       MCP_UNTRUSTED_OUTPUT: "1"
       MCP_PUBLIC_URL: https://telegram.${MCP_DOMAIN}
 

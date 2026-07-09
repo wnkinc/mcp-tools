@@ -113,6 +113,10 @@ and follow the Slack-app steps inside that file — including pointing the app's
 Interactivity Request URL at `https://approval.example.com/slack/interact`
 (once, ever).
 
+To run a deploy without approvals instead, opt out explicitly with
+`MCP_REQUIRE_APPROVAL=0` in the root `.env` — write actions on the gated tools
+then run ungated.
+
 ## 6. Per-tool secrets
 
 For each tool you enabled:

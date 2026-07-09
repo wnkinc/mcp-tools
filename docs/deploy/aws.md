@@ -134,6 +134,10 @@ configured, gated calls report the approval as undeliverable. On the VM:
 follow the Slack-app steps inside it (Interactivity Request URL:
 `https://approval.example.com/slack/interact`), and `up -d` again.
 
+To run a deploy without approvals instead, opt out explicitly with
+`MCP_REQUIRE_APPROVAL=0` in the root `.env` — write actions on the gated tools
+then run ungated.
+
 ## 7. Verify + connect Claude
 
 From anywhere:

@@ -25,9 +25,12 @@ while keeping its domain, tunnel, and credentials.
    `telegram`). On is the default and each path picks its natural provider
    (table above). Off skips the HF/Bedrock setup entirely — set it off only if
    you accept unscreened external content reaching your model context.
-3. **Approvals: Slack or page-link** — human-in-the-loop for gated tool calls.
-   Works out of the box via an approve page link; creating a Slack app adds
-   one-click Approve/Deny cards. The Slack app is the only optional setup step.
+3. **Approvals: channel or off** — human-in-the-loop for the gated tools
+   (`xmcp`, `telegram`): a gated call posts an Approve/Deny card to your
+   approval channel (Slack today; discord/telegram planned) and reports a
+   pending status in chat. Skipping this needs an explicit opt-out
+   (`MCP_REQUIRE_APPROVAL=0` in the root `.env`) — with approvals on but no
+   channel configured, every gated call fails as "approval undeliverable".
 
 ## What every deployment needs (gathered up front)
 

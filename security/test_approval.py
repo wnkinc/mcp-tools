@@ -85,6 +85,21 @@ def test_gate_reports_undelivered_slack():
     assert _gate(c) == {"decision": "pending", "created": False, "notified": False}
 
 
+def test_unimplemented_provider_fails_closed(slack_ok, monkeypatch):
+    # Slack delivery would succeed, but the configured provider isn't slack:
+    # dispatch must not fall through to it -- the approval reports undeliverable.
+    monkeypatch.setenv("APPROVAL_PROVIDER", "discord")
+    assert _gate(TestClient(svc.app))["notified"] is False
+
+
+def test_healthz_reports_provider(monkeypatch):
+    c = TestClient(svc.app)
+    h = c.get("/healthz").json()
+    assert h["ok"] is True and h["provider"] == "slack" and h["channel"] == "unconfigured"
+    monkeypatch.setenv("APPROVAL_PROVIDER", "discord")
+    assert c.get("/healthz").json()["ok"] is False
+
+
 def test_approve_allows_exactly_once():
     c = TestClient(svc.app)
     _gate(c)
