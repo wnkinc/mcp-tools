@@ -36,7 +36,7 @@ name = f"mcp-tools-{pulumi.get_stack()}"
 tunnel_secret = random_.RandomPassword(f"{name}-tunnel-secret", length=48, special=False)
 tunnel_secret_b64 = tunnel_secret.result.apply(lambda s: base64.b64encode(s.encode()).decode())
 
-tunnel = cloudflare.Tunnel(
+tunnel = cloudflare.ZeroTrustTunnelCloudflared(
     f"{name}-tunnel",
     account_id=account_id,
     name=name,
@@ -52,7 +52,7 @@ wildcard = cloudflare.Record(
     zone_id=zone_id,
     name="*",
     type="CNAME",
-    value=tunnel.id.apply(lambda i: f"{i}.cfargotunnel.com"),
+    content=tunnel.id.apply(lambda i: f"{i}.cfargotunnel.com"),
     proxied=True,
     ttl=1,  # proxied records are always TTL "auto"
 )
