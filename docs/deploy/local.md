@@ -111,7 +111,11 @@ cp security/approval/service/env.example security/approval/service/.env
 
 and follow the Slack-app steps inside that file — including pointing the app's
 Interactivity Request URL at `https://approval.example.com/slack/interact`
-(once, ever).
+(once, ever). Prefer Discord? Same file: follow its Discord-app steps and set
+`APPROVAL_PROVIDER=discord` (its Interactions Endpoint URL must be saved
+*after* the sidecar is up — Discord validates it immediately). Whichever you
+pick, use a platform your agent doesn't operate — approval is human-in-the-loop,
+and a card the agent's own tools can read and click defeats the purpose.
 
 To run a deploy without approvals instead, opt out explicitly with
 `MCP_REQUIRE_APPROVAL=0` in the root `.env` — write actions on the gated tools

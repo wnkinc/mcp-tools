@@ -123,11 +123,12 @@ def serve(
         note = (
             "Some tools on this server are gated behind out-of-band human approval: "
             "instead of running, a gated call reports a pending status and an "
-            "Approve/Deny card for that exact action is posted to the user's Slack. "
-            "After the user approves it there, calling the same tool again with the "
-            "same arguments performs the action; if they deny it, that call reports "
-            "the denial. Undecided requests expire after 10 minutes, and a later call "
-            "posts a fresh card."
+            "Approve/Deny card for that exact action is posted to the user's approval "
+            "channel (Slack or Discord, per the server's setup). After the user "
+            "approves it there, calling the same tool again with the same arguments "
+            "performs the action; if they deny it, that call reports the denial. "
+            "Undecided requests expire after 10 minutes, and a later call posts a "
+            "fresh card."
         )
         mcp.instructions = f"{mcp.instructions}\n\n{note}" if mcp.instructions else note
     if untrusted_output:

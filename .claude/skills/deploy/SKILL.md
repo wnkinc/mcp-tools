@@ -62,12 +62,17 @@ Ask the user, in a single round, the decisions `docs/DEPLOY.md` lists:
 4. **Approvals** — only if the picked tools include a gated one (xmcp,
    telegram): write actions on those tools require out-of-band human
    approval, delivered as an Approve/Deny card to an approval channel
-   (Slack today; discord/telegram planned). Ask: set up the channel (a free
-   Slack app, ~5 browser minutes, done while other steps run), or run this
-   deploy with approvals off (`MCP_REQUIRE_APPROVAL=0` in the root `.env`)?
-   There is no third option: gated tools with no channel fail every gated
-   call as "approval undeliverable". If they choose off, say plainly that
-   write actions on those tools will then run ungated.
+   (Slack or Discord; telegram planned). Ask: set up a channel (a free
+   Slack/Discord app, ~5-10 browser minutes, done while other steps run),
+   or run this deploy with approvals off (`MCP_REQUIRE_APPROVAL=0` in the
+   root `.env`)? There is no third option: gated tools with no channel fail
+   every gated call as "approval undeliverable". If they choose off, say
+   plainly that write actions on those tools will then run ungated.
+   When they pick the channel, explain the point of the control: approval
+   is HUMAN-in-the-loop, so it must live on a platform (or at least an
+   account) the agent does not operate — if the agent's own tools can read
+   the card and press its buttons, the gate can approve itself. Steer them
+   to whichever of Slack/Discord their agent doesn't touch.
 
 ## Phase 1 — preflight
 
@@ -147,12 +152,15 @@ the runbook, and get an explicit yes. The Cloudflare ingress stack and
 - Per-tool secrets step: read `tools/<tool>/env.example` for each chosen
   tool and collect only those values, following the secrets protocol above.
 - Approval-channel step (gated tools + channel chosen in Phase 0): drive the
-  runbook's Approvals section. The Slack-app walkthrough lives in
-  `security/approval/service/env.example` — give the click-path
-  (create app → `chat:write` scope → install → signing secret → private
-  channel + invite bot → Interactivity Request URL
-  `https://approval.<domain>/slack/interact`), collect the three values per
-  the secrets protocol into `security/approval/service/.env`, and verify:
+  runbook's Approvals section. Both walkthroughs live in
+  `security/approval/service/env.example` — Slack (create app → `chat:write`
+  scope → install → signing secret → private channel + invite bot →
+  Interactivity Request URL `https://approval.<domain>/slack/interact`) or
+  Discord (create app → bot token → public key → channel ID → Interactions
+  Endpoint URL `https://approval.<domain>/discord/interact`, set LAST — the
+  sidecar must be live when Discord validates it; also set
+  `APPROVAL_PROVIDER=discord`). Collect the three values per the secrets
+  protocol into `security/approval/service/.env`, and verify:
   the sidecar's `/healthz` (compose-internal, e.g.
   `docker compose exec approval python -c ...`) must show
   `"channel": "configured"`, and a test POST to its `/gate` must return

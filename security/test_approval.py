@@ -88,7 +88,7 @@ def test_gate_reports_undelivered_slack():
 def test_unimplemented_provider_fails_closed(slack_ok, monkeypatch):
     # Slack delivery would succeed, but the configured provider isn't slack:
     # dispatch must not fall through to it -- the approval reports undeliverable.
-    monkeypatch.setenv("APPROVAL_PROVIDER", "discord")
+    monkeypatch.setenv("APPROVAL_PROVIDER", "telegram")
     assert _gate(TestClient(svc.app))["notified"] is False
 
 
@@ -96,8 +96,35 @@ def test_healthz_reports_provider(monkeypatch):
     c = TestClient(svc.app)
     h = c.get("/healthz").json()
     assert h["ok"] is True and h["provider"] == "slack" and h["channel"] == "unconfigured"
-    monkeypatch.setenv("APPROVAL_PROVIDER", "discord")
+    monkeypatch.setenv("APPROVAL_PROVIDER", "telegram")
     assert c.get("/healthz").json()["ok"] is False
+
+
+def test_notify_dispatches_to_the_configured_provider(monkeypatch):
+    delivered = []
+
+    async def _discord(token, action, source):
+        delivered.append(source)
+        return True
+
+    async def _slack(token, action, source):  # pragma: no cover - must not run
+        raise AssertionError("slack called while APPROVAL_PROVIDER=discord")
+
+    monkeypatch.setattr(svc, "_discord_post_approval", _discord)
+    monkeypatch.setattr(svc, "_slack_post_approval", _slack)
+    monkeypatch.setenv("APPROVAL_PROVIDER", "discord")
+    assert _gate(TestClient(svc.app))["notified"] is True
+    assert delivered == ["teltool"]
+
+
+def test_healthz_channel_follows_active_provider(monkeypatch):
+    c = TestClient(svc.app)
+    monkeypatch.setenv("APPROVAL_PROVIDER", "discord")
+    assert c.get("/healthz").json()["channel"] == "unconfigured"
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "x")
+    monkeypatch.setenv("DISCORD_PUBLIC_KEY", "x")
+    monkeypatch.setenv("DISCORD_APPROVAL_CHANNEL_ID", "1")
+    assert c.get("/healthz").json()["channel"] == "configured"
 
 
 def test_approve_allows_exactly_once():
@@ -190,6 +217,80 @@ def test_interact_approves_with_valid_signature(monkeypatch):
     assert _gate(c)["decision"] == "allow"
 
 
+# --- the Discord webhook: Ed25519 signature is the gate ------------------------------
+
+
+@pytest.fixture
+def discord_keys(monkeypatch):
+    """A real Ed25519 keypair; the app verifies against the public half."""
+    from nacl.signing import SigningKey
+
+    sk = SigningKey.generate()
+    monkeypatch.setenv("DISCORD_PUBLIC_KEY", sk.verify_key.encode().hex())
+    return sk
+
+
+def _discord_interact(client, payload, signing_key):
+    body = json.dumps(payload).encode()
+    ts = str(int(time.time()))
+    sig = signing_key.sign(ts.encode() + body).signature.hex()
+    return client.post(
+        "/discord/interact",
+        content=body,
+        headers={
+            "X-Signature-Timestamp": ts,
+            "X-Signature-Ed25519": sig,
+            "Content-Type": "application/json",
+        },
+    )
+
+
+def _discord_click(client, token, action_id, signing_key):
+    return _discord_interact(
+        client, {"type": 3, "data": {"custom_id": f"{action_id}:{token}"}}, signing_key
+    )
+
+
+def test_discord_ping_pongs(discord_keys):
+    resp = _discord_interact(TestClient(svc.app), {"type": 1}, discord_keys)
+    assert resp.status_code == 200 and resp.json() == {"type": 1}
+
+
+def test_discord_rejects_bad_signature(discord_keys):
+    from nacl.signing import SigningKey
+
+    c = TestClient(svc.app)
+    _gate(c)
+    wrong_key = SigningKey.generate()  # not the key the app trusts
+    assert _discord_click(c, _token(), "approve", wrong_key).status_code == 401
+    assert _gate(c)["decision"] == "pending"
+
+
+def test_discord_approve_allows(discord_keys):
+    c = TestClient(svc.app)
+    _gate(c)
+    resp = _discord_click(c, _token(), "approve", discord_keys)
+    # Type 7 replaces the card in place, removing the buttons.
+    assert resp.status_code == 200 and resp.json()["type"] == 7
+    assert resp.json()["data"]["components"] == []
+    assert _gate(c)["decision"] == "allow"
+
+
+def test_discord_deny_denies(discord_keys):
+    c = TestClient(svc.app)
+    _gate(c)
+    _discord_click(c, _token(), "deny", discord_keys)
+    assert _gate(c)["decision"] == "denied"
+
+
+def test_discord_expired_token_decides_nothing(discord_keys):
+    c = TestClient(svc.app)
+    _gate(c)
+    resp = _discord_click(c, "not-a-token", "approve", discord_keys)
+    assert "expired" in resp.json()["data"]["content"]
+    assert _gate(c)["decision"] == "pending"
+
+
 # --- the middleware, end-to-end against the real service app -------------------------
 
 
@@ -219,10 +320,10 @@ def _pending_text(mw):
     return asyncio.run(mw.on_call_tool(_ctx(), _ran)).content[0].text
 
 
-def test_middleware_gates_then_allows_after_slack_approval(slack_ok, monkeypatch):
+def test_middleware_gates_then_allows_after_card_approval(slack_ok, monkeypatch):
     mw = _middleware_against_service(monkeypatch)
     first = _pending_text(mw)
-    assert "NOT performed" in first and "Slack" in first
+    assert "NOT performed" in first and "approval channel" in first
     still = _pending_text(mw)
     assert "still awaiting" in still
     TestClient(svc.app).post(f"/approve/{_sole_token()}", data={"decision": "approve"})

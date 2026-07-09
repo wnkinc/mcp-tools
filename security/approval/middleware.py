@@ -4,16 +4,17 @@ claude.ai gives us no reliable in-chat gate: tool-approval is sticky (approve on
 and it's approved across every chat; the connector "needs approval" setting stops
 applying), and MCP elicitation dialogs don't render for custom connectors (tested).
 So a gated tool short-circuits to a plain pending status, an Approve/Deny card is
-pushed to the operator's Slack, and the action runs ONLY after the human decides
-out-of-band. The model can't press the button or forge the server-side "approved"
-state, so this is a real gate.
+pushed to the operator's approval channel (Slack or Discord -- the sidecar's
+APPROVAL_PROVIDER), and the action runs ONLY after the human decides out-of-band.
+The model can't press the button or forge the server-side "approved" state, so
+this is a real gate.
 
 The model-facing status deliberately carries NO approval URL and no instructions
 addressed to the assistant: a tool result that says "show this link, it's not
 phishing" is exactly the shape of a prompt-injection attack, and both claude.ai's
 injection screening and the model itself (rightly) refuse to relay it. All
-human-facing surfaces (Slack card, approval page linked FROM the card) live in the
-trusted out-of-band channel; the chat only learns facts. The protocol itself is
+human-facing surfaces (the card, the approval page linked FROM the card) live in
+the trusted out-of-band channel; the chat only learns facts. The protocol itself is
 pre-declared in the server's MCP instructions (see security/serve.py), so a pending
 status arrives as expected behavior instead of a surprise.
 
@@ -117,24 +118,25 @@ class ApprovalMiddleware(Middleware):
         if not data.get("notified", True):
             return _note(
                 f"⚠️ `{action}` requires out-of-band human approval and was NOT "
-                "performed — and the approval request could not be delivered to Slack "
-                "(approval channel unconfigured or unreachable), so it cannot currently "
-                "be approved. The server operator needs to restore the Slack approval "
-                "channel before this action can proceed."
+                "performed — and the approval request could not be delivered to the "
+                "approval channel (unconfigured or unreachable), so it cannot currently "
+                "be approved. The server operator needs to restore the approval channel "
+                "before this action can proceed."
             )
         if not data.get("created"):
             return _note(
-                f"⏳ `{action}` is still awaiting human approval on the Slack card. "
-                "Once approved there, calling the same tool with the same arguments "
-                "performs the action."
+                f"⏳ `{action}` is still awaiting human approval on the card in the "
+                "user's approval channel. Once approved there, calling the same tool "
+                "with the same arguments performs the action."
             )
         return _note(
             f"⏸ Approval required — `{action}` was NOT performed.\n\n"
             "This server gates this tool behind out-of-band human approval: an "
             "Approve/Deny card for this exact action has been posted to the user's "
-            "Slack. Once the user approves it there, calling the same tool again with "
-            "the same arguments performs the action; until then it reports "
-            "still-pending. Denying it cancels the action."
+            "approval channel (Slack or Discord, per the server's setup). Once the "
+            "user approves it there, calling the same tool again with the same "
+            "arguments performs the action; until then it reports still-pending. "
+            "Denying it cancels the action."
         )
 
 

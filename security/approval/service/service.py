@@ -9,15 +9,16 @@ service, which holds all the state. One-click Approve works for any number of
 tools, and the Slack bot token lives in exactly one container (not in tools).
 
 Integrity: a tool can only CREATE a pending approval and ASK its status. The
-only writers of "approved"/"denied" are the Slack-signed webhook and the
-capability-token page -- both human-driven. A compromised tool cannot flip its
-own approvals.
+only writers of "approved"/"denied" are the signature-verified provider
+webhooks (Slack HMAC / Discord Ed25519) and the capability-token page -- all
+human-driven. A compromised tool cannot flip its own approvals.
 
 Endpoints:
-  POST /gate            (internal) create-or-check an approval for a tool call
-  GET/POST /approve/{token}  (public via tunnel) the human approval page
-  POST /slack/interact  (public via tunnel) Slack button clicks, signature-verified
-  GET /healthz          liveness + config visibility
+  POST /gate              (internal) create-or-check an approval for a tool call
+  GET/POST /approve/{token}    (public via tunnel) the human approval page
+  POST /slack/interact    (public via tunnel) Slack button clicks, HMAC-verified
+  POST /discord/interact  (public via tunnel) Discord button clicks, Ed25519-verified
+  GET /healthz            liveness + config visibility
 
 Single uvicorn process => a plain in-memory dict is fine for pending approvals
 (they are 10-minute ephemera; a restart just re-prompts).
@@ -36,6 +37,8 @@ import time
 import urllib.parse
 
 import httpx
+from nacl.exceptions import BadSignatureError
+from nacl.signing import VerifyKey
 from starlette.applications import Starlette
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
@@ -46,17 +49,21 @@ log = logging.getLogger("approval")
 _PENDING: dict[str, dict] = {}
 _TTL_SECONDS = 600  # approval links expire after 10 minutes
 
-# The out-of-band platform that delivers approval cards. Only "slack" is
-# implemented; "discord" and "telegram" are planned. NOTE for telegram: it must
-# never deliver approvals while the telegram TOOL is deployed -- that tool
-# operates the user's own account (read history + press_inline_button), so a
-# card the account can see is a card the model can approve itself.
-_PROVIDERS_IMPLEMENTED = {"slack"}
-_PROVIDERS_PLANNED = {"discord", "telegram"}
+# The out-of-band platform that delivers approval cards; "telegram" is planned.
+# Human-in-the-loop only works if the platform is one the agent does NOT operate:
+# a card the agent's tools can see and press is a gate that approves itself
+# (e.g. the telegram provider while the telegram TOOL runs on the same account).
+_PROVIDERS_IMPLEMENTED = {"slack", "discord"}
+_PROVIDERS_PLANNED = {"telegram"}
 
 
 def _provider() -> str:
     return os.getenv("APPROVAL_PROVIDER", "slack").strip().lower()
+
+
+def _channel_configured() -> bool:
+    """Does the ACTIVE provider have the env it needs to reach a human?"""
+    return {"slack": _slack_enabled, "discord": _discord_enabled}.get(_provider(), lambda: False)()
 
 
 async def _notify(token: str, action: str, source: str) -> bool:
@@ -69,6 +76,8 @@ async def _notify(token: str, action: str, source: str) -> bool:
     provider = _provider()
     if provider == "slack":
         return await _slack_post_approval(token, action, source)
+    if provider == "discord":
+        return await _discord_post_approval(token, action, source)
     log.error(
         "APPROVAL_PROVIDER=%r is not implemented (implemented: %s; planned: %s)",
         provider,
@@ -334,13 +343,112 @@ async def slack_interact(request):  # type: ignore[no-untyped-def]
     return Response(status_code=200)
 
 
+# ---------------------------------------------------------------------------
+# Discord provider: same shape as Slack -- post a card with buttons, receive
+# the click on a signed public webhook. Discord signs interactions with the
+# app's Ed25519 key and validates the endpoint (a PING plus a deliberately bad
+# signature) the moment its URL is saved, so the sidecar must be live first.
+# ---------------------------------------------------------------------------
+def _discord_enabled() -> bool:
+    return bool(
+        os.getenv("DISCORD_BOT_TOKEN")
+        and os.getenv("DISCORD_APPROVAL_CHANNEL_ID")
+        and os.getenv("DISCORD_PUBLIC_KEY")
+    )
+
+
+async def _discord_post_approval(token: str, action: str, source: str) -> bool:
+    """Post an Approve/Deny card to the Discord channel. Same contract as Slack:
+    True only when Discord accepted the message; never raises."""
+    if not _discord_enabled():
+        return False
+    content = f"⏸ **Approval requested** — `{source}`\n> {action}"
+    if os.getenv("APPROVAL_PUBLIC_URL"):
+        # <> suppresses the link preview; the page is the fallback if buttons fail.
+        content += f"\n-# <{_approve_link(token)}> — approval page fallback"
+    payload = {
+        "content": content,
+        "components": [
+            {
+                "type": 1,  # action row
+                "components": [
+                    {"type": 2, "style": 3, "label": "✅ Approve", "custom_id": f"approve:{token}"},
+                    {"type": 2, "style": 4, "label": "❌ Deny", "custom_id": f"deny:{token}"},
+                ],
+            }
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://discord.com/api/v10/channels/"
+                f"{os.environ['DISCORD_APPROVAL_CHANNEL_ID']}/messages",
+                headers={"Authorization": f"Bot {os.environ['DISCORD_BOT_TOKEN']}"},
+                json=payload,
+            )
+        if resp.status_code // 100 != 2:
+            log.error("Discord message post failed: %s %s", resp.status_code, resp.text[:300])
+            return False
+        return True
+    except Exception:  # noqa: BLE001
+        log.exception("Discord approval post failed")
+        return False
+
+
+def _verify_discord_signature(timestamp: str, body: bytes, signature: str) -> bool:
+    """Verify Discord's Ed25519 interaction signature (timestamp + body)."""
+    key = os.getenv("DISCORD_PUBLIC_KEY", "")
+    if not (key and timestamp and signature):
+        return False
+    try:
+        VerifyKey(bytes.fromhex(key)).verify(timestamp.encode() + body, bytes.fromhex(signature))
+        return True
+    except (BadSignatureError, ValueError):
+        return False
+
+
+async def discord_interact(request):  # type: ignore[no-untyped-def]
+    raw = await request.body()
+    if not _verify_discord_signature(
+        request.headers.get("X-Signature-Timestamp", ""),
+        raw,
+        request.headers.get("X-Signature-Ed25519", ""),
+    ):
+        # 401 is what Discord's endpoint validation expects for its bad-signature probe.
+        return PlainTextResponse("bad signature", status_code=401)
+
+    payload = json.loads(raw or "{}")
+    if payload.get("type") == 1:  # PING (endpoint validation) -> PONG
+        return JSONResponse({"type": 1})
+    if payload.get("type") != 3:  # only button clicks (MESSAGE_COMPONENT) decide
+        return JSONResponse(
+            {"type": 4, "data": {"content": "Unsupported interaction.", "flags": 64}}
+        )
+
+    action_id, _, token = (payload.get("data", {}).get("custom_id") or "").partition(":")
+    _prune()
+    rec = _PENDING.get(token)
+    if rec is None:
+        msg = "⚠️ This approval has expired."
+    elif action_id == "approve":
+        rec["status"] = "approved"
+        msg = f"✅ **Approved**\n> {rec['action']}\n\nReturn to Claude and tell it to continue."
+    elif action_id == "deny":
+        rec["status"] = "denied"
+        msg = f"❌ **Denied**\n> {rec['action']}"
+    else:
+        msg = "Unknown action."
+    # Type 7 = UPDATE_MESSAGE: replace the card in place (removes the buttons).
+    return JSONResponse({"type": 7, "data": {"content": msg, "components": []}})
+
+
 async def healthz(request):  # type: ignore[no-untyped-def]
     provider = _provider()
     return JSONResponse(
         {
             "ok": provider in _PROVIDERS_IMPLEMENTED,
             "provider": provider,
-            "channel": "configured" if _slack_enabled() else "unconfigured",
+            "channel": "configured" if _channel_configured() else "unconfigured",
             "public_url_set": bool(os.getenv("APPROVAL_PUBLIC_URL")),
             "pending": len(_PENDING),
         }
@@ -352,6 +460,7 @@ app = Starlette(
         Route("/gate", gate, methods=["POST"]),
         Route("/approve/{token}", approve_route, methods=["GET", "POST"]),
         Route("/slack/interact", slack_interact, methods=["POST"]),
+        Route("/discord/interact", discord_interact, methods=["POST"]),
         Route("/healthz", healthz, methods=["GET"]),
     ]
 )

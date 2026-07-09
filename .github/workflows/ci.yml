@@ -60,7 +60,9 @@ jobs:
       # The locks are hash-pinned, so pytest (dev-only, deliberately not in them)
       # must be a separate resolution or --require-hashes rejects it.
       - run: pip install -r ${{ matrix.lock }}
-      - run: pip install pytest
+      # pynacl: the security tests exercise the approval sidecar's Discord Ed25519
+      # verification; it lives in the sidecar's own lock, not xmcp's.
+      - run: pip install pytest pynacl
       - run: pytest ${{ matrix.tests }} -q
 
   compose-validate:

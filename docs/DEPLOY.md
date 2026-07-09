@@ -27,10 +27,13 @@ while keeping its domain, tunnel, and credentials.
    you accept unscreened external content reaching your model context.
 3. **Approvals: channel or off** — human-in-the-loop for the gated tools
    (`xmcp`, `telegram`): a gated call posts an Approve/Deny card to your
-   approval channel (Slack today; discord/telegram planned) and reports a
-   pending status in chat. Skipping this needs an explicit opt-out
-   (`MCP_REQUIRE_APPROVAL=0` in the root `.env`) — with approvals on but no
-   channel configured, every gated call fails as "approval undeliverable".
+   approval channel (Slack or Discord — `APPROVAL_PROVIDER` in the sidecar's
+   `.env`; telegram planned) and reports a pending status in chat. Pick a
+   platform the agent does **not** operate — if the agent's tools can read the
+   card and press its buttons, the gate can approve itself. Skipping approvals
+   needs an explicit opt-out (`MCP_REQUIRE_APPROVAL=0` in the root `.env`) —
+   with approvals on but no channel configured, every gated call fails as
+   "approval undeliverable".
 
 ## What every deployment needs (gathered up front)
 

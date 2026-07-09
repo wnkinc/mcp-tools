@@ -1,6 +1,7 @@
-# The sidecar's whole world: an ASGI app + the two HTTP clients it makes
-# (slack.com posts via the egress wall, response_url updates). Locked with
-# hashes like every tool (uv pip compile --generate-hashes).
+# The sidecar's whole world: an ASGI app, the HTTP clients that post approval
+# cards through the egress wall, and Ed25519 verification for Discord's signed
+# interactions. Locked with hashes like every tool (uv pip compile --generate-hashes).
 starlette>=0.40
 uvicorn>=0.30
 httpx>=0.28
+pynacl>=1.5

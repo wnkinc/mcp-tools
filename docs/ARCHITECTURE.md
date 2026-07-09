@@ -73,19 +73,23 @@ The same image runs locally (`docker compose up`) and in the cloud — transport
   central egress audit log. Verified: allowlisted hosts succeed through the proxy, others
   get `TCP_DENIED/403`, and a proxy-bypass attempt is dropped.
 
-- **Approvals live in a sidecar (one owner, one-click for every tool).** Slack
-  delivers every button click to a single app-level Request URL, so pending-approval
-  state can't live per-tool — the approval sidecar (`security/approval/service/`,
-  `http://approval:8072` internally, `approval.<MCP_DOMAIN>` publicly) owns all
-  tokens, the approve page, and the Slack webhook. Tools only create/query their own
-  approvals; decisions are written solely by the human channels (capability-URL page
-  or Slack-signed webhook), so a compromised tool can't approve itself — and the
-  Slack bot token lives in exactly one container. The Slack card is the only surface
+- **Approvals live in a sidecar (one owner, one-click for every tool).** Slack and
+  Discord deliver every button click to a single app-level webhook URL, so
+  pending-approval state can't live per-tool — the approval sidecar
+  (`security/approval/service/`, `http://approval:8072` internally,
+  `approval.<MCP_DOMAIN>` publicly) owns all tokens, the approve page, and the
+  provider webhooks (`APPROVAL_PROVIDER=slack|discord`; telegram planned). Tools
+  only create/query their own approvals; decisions are written solely by the human
+  channels (capability-URL page, Slack HMAC-signed webhook, or Discord
+  Ed25519-signed webhook), so a compromised tool can't approve itself — and the
+  provider bot token lives in exactly one container. The card is the only surface
   shown to the human: the model-facing pending message is a bare status with no URL,
   because a tool result asking the model to relay a link is indistinguishable from
   prompt injection and gets flagged or refused (the approve page is linked from the
   card as a fallback, and the protocol is pre-declared in each gated server's MCP
-  instructions via `serve()`).
+  instructions via `serve()`). Human-in-the-loop only holds if the approval platform
+  is one the agent does not operate — a card the agent's own tools can read and
+  click is a gate that approves itself.
 
 - **Google OAuth with a verified-email allowlist, fail-closed.** `GoogleProvider`
   authenticates *any* Google account; `security/auth.py` wraps its token verifier to

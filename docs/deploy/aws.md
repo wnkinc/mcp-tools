@@ -132,7 +132,12 @@ pending status in chat and posts an Approve/Deny card to Slack; without Slack
 configured, gated calls report the approval as undeliverable. On the VM:
 `sudo cp security/approval/service/env.example security/approval/service/.env`,
 follow the Slack-app steps inside it (Interactivity Request URL:
-`https://approval.example.com/slack/interact`), and `up -d` again.
+`https://approval.example.com/slack/interact`), and `up -d` again. Prefer
+Discord? Same file: follow its Discord-app steps and set
+`APPROVAL_PROVIDER=discord` (save the Interactions Endpoint URL *after* the
+sidecar is up — Discord validates it immediately). Whichever you pick, use a
+platform your agent doesn't operate — approval is human-in-the-loop, and a
+card the agent's own tools can read and click defeats the purpose.
 
 To run a deploy without approvals instead, opt out explicitly with
 `MCP_REQUIRE_APPROVAL=0` in the root `.env` — write actions on the gated tools
