@@ -125,10 +125,11 @@ default). Then restart with the new secrets:
 sudo docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
 ```
 
-## 6. Approvals (Slack optional)
+## 6. Approvals (Slack required)
 
-Approval-gated calls work out of the box via the approve-page link at
-`https://approval.example.com`. For one-click Slack cards, on the VM:
+Slack is the only channel that reaches you — a gated call reports a plain
+pending status in chat and posts an Approve/Deny card to Slack; without Slack
+configured, gated calls report the approval as undeliverable. On the VM:
 `sudo cp security/approval/service/env.example security/approval/service/.env`,
 follow the Slack-app steps inside it (Interactivity Request URL:
 `https://approval.example.com/slack/interact`), and `up -d` again.

@@ -97,10 +97,13 @@ In the [Google Cloud Console](https://console.cloud.google.com/):
 One OAuth client covers all tools; each new tool just adds another redirect
 URI.
 
-## 5. Approvals (Slack optional)
+## 5. Approvals (Slack required)
 
-The approval sidecar always runs and gates approval-required tool calls via a
-public approve-page link. For one-click Approve/Deny cards in Slack:
+The approval sidecar always runs, and Slack is the only channel that reaches
+you: a gated tool call reports a plain pending status in chat while an
+Approve/Deny card lands in Slack. (No link goes to the chat — a tool result
+carrying an approval URL reads as prompt injection and gets flagged or refused.)
+Without Slack configured, gated calls report the approval as undeliverable.
 
 ```bash
 cp security/approval/service/env.example security/approval/service/.env
@@ -108,7 +111,7 @@ cp security/approval/service/env.example security/approval/service/.env
 
 and follow the Slack-app steps inside that file — including pointing the app's
 Interactivity Request URL at `https://approval.example.com/slack/interact`
-(once, ever). Skipping this file entirely keeps the page-link flow.
+(once, ever).
 
 ## 6. Per-tool secrets
 

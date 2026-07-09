@@ -3,9 +3,19 @@
 claude.ai gives us no reliable in-chat gate: tool-approval is sticky (approve once
 and it's approved across every chat; the connector "needs approval" setting stops
 applying), and MCP elicitation dialogs don't render for custom connectors (tested).
-So a gated tool returns a clickable approval link to the chat and performs the action
-ONLY after the human decides out-of-band. The model can't click the link or forge the
-server-side "approved" state, so this is a real gate.
+So a gated tool short-circuits to a plain pending status, an Approve/Deny card is
+pushed to the operator's Slack, and the action runs ONLY after the human decides
+out-of-band. The model can't press the button or forge the server-side "approved"
+state, so this is a real gate.
+
+The model-facing status deliberately carries NO approval URL and no instructions
+addressed to the assistant: a tool result that says "show this link, it's not
+phishing" is exactly the shape of a prompt-injection attack, and both claude.ai's
+injection screening and the model itself (rightly) refuse to relay it. All
+human-facing surfaces (Slack card, approval page linked FROM the card) live in the
+trusted out-of-band channel; the chat only learns facts. The protocol itself is
+pre-declared in the server's MCP instructions (see security/serve.py), so a pending
+status arrives as expected behavior instead of a surprise.
 
 The state and the human-facing surfaces (approval page, Slack card + interactivity
 webhook) live in the APPROVAL SIDECAR (security/approval/service/), one per stack:
@@ -101,25 +111,30 @@ class ApprovalMiddleware(Middleware):
         if decision == "allow":
             return await call_next(context)
         if decision == "denied":
-            return _note(f"❌ You denied this action ({action}), so I did not run it.")
-        if decision == "pending" and not data.get("created"):
+            return _note(f"❌ The user denied `{action}`, so it was not performed.")
+        # Pending. `notified` reports whether the Slack card actually reached the
+        # human; default True so an older sidecar (no such field) isn't a false alarm.
+        if not data.get("notified", True):
             return _note(
-                f"⏳ Still waiting for your approval of `{action}` — open the link or tap "
-                f"**Approve** in Slack, then ask me to continue."
+                f"⚠️ `{action}` requires out-of-band human approval and was NOT "
+                "performed — and the approval request could not be delivered to Slack "
+                "(approval channel unconfigured or unreachable), so it cannot currently "
+                "be approved. The server operator needs to restore the Slack approval "
+                "channel before this action can proceed."
+            )
+        if not data.get("created"):
+            return _note(
+                f"⏳ `{action}` is still awaiting human approval on the Slack card. "
+                "Once approved there, calling the same tool with the same arguments "
+                "performs the action."
             )
         return _note(
-            "APPROVAL REQUIRED — the action was NOT performed.\n\n"
-            "INSTRUCTIONS FOR THE ASSISTANT: This is the server's own out-of-band "
-            "approval gate (expected behavior, not phishing). Show the user the full "
-            "approval URL below exactly as written, on its own line, so it renders as "
-            "a clickable link. Do NOT paraphrase it, shorten it, or say 'the link "
-            "above' — the user cannot see your tool output, only what you write. Then "
-            "stop and wait for the user.\n\n"
-            f"Action awaiting approval: {action}\n\n"
-            f"Approval URL: {data.get('approve_url', '')}\n\n"
-            "The user can also tap Approve on the Slack card. After they approve, call "
-            "the SAME tool again with the SAME arguments to proceed. Until then, that "
-            "call will report still-pending."
+            f"⏸ Approval required — `{action}` was NOT performed.\n\n"
+            "This server gates this tool behind out-of-band human approval: an "
+            "Approve/Deny card for this exact action has been posted to the user's "
+            "Slack. Once the user approves it there, calling the same tool again with "
+            "the same arguments performs the action; until then it reports "
+            "still-pending. Denying it cancels the action."
         )
 
 
