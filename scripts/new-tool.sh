@@ -72,7 +72,7 @@ TXT
 
 cat > "$DIR/env.example" <<ENV
 # Container sets MCP_HOST/MCP_PORT/MCP_TRANSPORT; this file is secrets + posture only.
-MCP_AUTH_ENABLED=0
+MCP_AUTH_ENABLED=1
 # MCP_PUBLIC_URL is stamped by the tunnel overlay from the root .env's MCP_DOMAIN;
 # set it here only when running outside compose.
 #MCP_PUBLIC_URL=https://${SUBDOMAIN}

@@ -16,7 +16,10 @@ Prereqs on your workstation:
 - [Pulumi CLI](https://www.pulumi.com/docs/install/) + a backend
   (`pulumi login`), Python 3.11+.
 - [AWS Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
-  for the `aws ssm start-session` step.
+  for the `aws ssm start-session` step. The official installer needs interactive
+  sudo; without it (e.g. driving from Claude Cowork), extract the package into
+  your home directory instead — `dpkg -x session-manager-plugin.deb ~/.local`
+  and put `~/.local/usr/local/sessionmanagerplugin/bin` on `PATH`.
 - A domain on Cloudflare, its **Zone ID** and **Account ID** (both on the
   zone's Overview page), and an **API token** with `Cloudflare Tunnel:Edit` +
   `DNS:Edit` on that zone.
@@ -113,9 +116,10 @@ sudo cp tools/<tool>/env.example tools/<tool>/.env
 sudo nano tools/<tool>/.env
 ```
 
-Fill the tool's own values (documented in its `env.example`) plus the auth trio
-from step 4: `MCP_AUTH_ENABLED=1`, `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`,
-`MCP_ALLOWED_GOOGLE_EMAILS=<your email>`. Then restart with the new secrets:
+Fill the tool's own values (documented in its `env.example`) plus the auth pair
+from step 4: `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, and
+`MCP_ALLOWED_GOOGLE_EMAILS=<your email>` (`MCP_AUTH_ENABLED=1` is already the
+default). Then restart with the new secrets:
 
 ```bash
 sudo docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d

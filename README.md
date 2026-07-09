@@ -8,23 +8,21 @@ on an EC2 VM that `pulumi up` provisions — same stack either way
 
 ## Quick start
 
-### Terminal
+#### Terminal
 ```bash
 git clone https://github.com/wnkinc/claude-custom-connector-server.git mcp-tools
 cd mcp-tools
 claude        # then say: "deploy this"
 ```
 
-### Claude Cowork
+#### Claude Cowork
 Claude in the desktop app, no terminal needed. Tell it where this repo lives and what you want:
 
 > Download https://github.com/wnkinc/claude-custom-connector-server and deploy it
 
-Claude takes it from there.
-
-### Driving it yourself instead?
-**[docs/DEPLOY.md](docs/DEPLOY.md)** is the chooser; it links the step-by-step runbook for each path
-([local](docs/deploy/local.md), [AWS](docs/deploy/aws.md)).
+Claude takes it from there. (On the AWS path, one prereq installer wants
+interactive sudo, which Cowork doesn't have — the
+[AWS runbook](docs/deploy/aws.md) prereqs include a no-sudo alternative.)
 
 ## FAQs
 Each tool is opt-in via a compose profile named after it — only the tools in

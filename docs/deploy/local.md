@@ -119,9 +119,9 @@ cp tools/<tool>/env.example tools/<tool>/.env
 ```
 
 Fill in the tool's own values (each `env.example` documents them) plus the
-auth trio from step 4: `MCP_AUTH_ENABLED=1`, `GOOGLE_CLIENT_ID` /
-`GOOGLE_CLIENT_SECRET`, and `MCP_ALLOWED_GOOGLE_EMAILS=<your email>` (also a
-Test user in step 4).
+auth pair from step 4: `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, and
+`MCP_ALLOWED_GOOGLE_EMAILS=<your email>` (also a Test user in step 4).
+`MCP_AUTH_ENABLED=1` is already the default.
 
 ## 7. Bring up the public stack
 
