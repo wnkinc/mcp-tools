@@ -60,19 +60,27 @@ Ask the user, in a single round, the decisions `docs/DEPLOY.md` lists:
    local, bedrock on AWS). Only surface this if they ask or pick tools that
    don't need it.
 4. **Approvals** — only if the picked tools include a gated one (xmcp,
-   telegram): write actions on those tools require out-of-band human
-   approval, delivered as an Approve/Deny card to an approval channel
-   (Slack or Discord; telegram planned). Ask: set up a channel (a free
-   Slack/Discord app, ~5-10 browser minutes, done while other steps run),
-   or run this deploy with approvals off (`MCP_REQUIRE_APPROVAL=0` in the
-   root `.env`)? There is no third option: gated tools with no channel fail
-   every gated call as "approval undeliverable". If they choose off, say
-   plainly that write actions on those tools will then run ungated.
-   When they pick the channel, explain the point of the control: approval
-   is HUMAN-in-the-loop, so it must live on a platform (or at least an
-   account) the agent does not operate — if the agent's own tools can read
-   the card and press its buttons, the gate can approve itself. Steer them
-   to whichever of Slack/Discord their agent doesn't touch.
+   telegram). Frame it as the server-side version of Claude's per-tool
+   "always allow / needs approval / blocked" — enforced here because the
+   desktop toggle is sticky (approve once and it sticks across every chat)
+   and doesn't reliably apply to custom connectors. Its purpose: keep
+   dangerous tool calls behind a human tap. Present the three postures and
+   let them pick:
+   - **Needs approval** (the default worth steering to): a gated write call
+     posts an Approve/Deny card to an approval channel and reports pending
+     in chat until they tap it. They choose the provider — Slack, Discord,
+     or Telegram (`APPROVAL_PROVIDER`) — a free app, ~5-10 browser minutes,
+     done while other steps run. A channel MUST be configured or every gated
+     call fails "approval undeliverable"; there is no silent fallback.
+   - **Always allow**: `MCP_REQUIRE_APPROVAL=0` in the root `.env`. Say
+     plainly that write actions on those tools then run ungated.
+   - **Blocked**: just don't deploy that tool.
+   Whichever provider they pick for needs-approval, explain the control is
+   HUMAN-in-the-loop, so it must live on a platform (or at least an account)
+   the agent does not operate — if the agent's own tools can read the card
+   and press its buttons, the gate approves itself. Steer them to whichever
+   of Slack/Discord/Telegram their agent doesn't touch (most sharply: don't
+   run the Telegram provider in a chat the telegram tool's account can see).
 
 ## Phase 1 — preflight
 
@@ -151,22 +159,31 @@ the runbook, and get an explicit yes. The Cloudflare ingress stack and
   assuming it worked.
 - Per-tool secrets step: read `tools/<tool>/env.example` for each chosen
   tool and collect only those values, following the secrets protocol above.
-- Approval-channel step (gated tools + channel chosen in Phase 0): drive the
-  runbook's Approvals section. Both walkthroughs live in
-  `security/approval/service/env.example` — Slack (create app → `chat:write`
-  scope → install → signing secret → private channel + invite bot →
-  Interactivity Request URL `https://approval.<domain>/slack/interact`) or
-  Discord (create app → bot token → public key → channel ID → Interactions
-  Endpoint URL `https://approval.<domain>/discord/interact`, set LAST — the
-  sidecar must be live when Discord validates it; also set
-  `APPROVAL_PROVIDER=discord`). Collect the three values per the secrets
-  protocol into `security/approval/service/.env`, and verify:
-  the sidecar's `/healthz` (compose-internal, e.g.
-  `docker compose exec approval python -c ...`) must show
-  `"channel": "configured"`, and a test POST to its `/gate` must return
+- Approval-channel step (gated tools + "needs approval" chosen in Phase 0):
+  drive the runbook's Approvals section. All three walkthroughs live in
+  `security/approval/service/env.example`:
+  - Slack — create app → `chat:write` scope → install → signing secret →
+    private channel + invite bot → Interactivity Request URL
+    `https://approval.<domain>/slack/interact`.
+  - Discord — create app → bot token → public key → channel ID → Interactions
+    Endpoint URL `https://approval.<domain>/discord/interact`, set LAST (the
+    sidecar must be live when Discord validates it); set
+    `APPROVAL_PROVIDER=discord`.
+  - Telegram — @BotFather bot token → a private chat/group the bot is in
+    (numeric chat id via `getUpdates`) → a long random webhook secret →
+    register the webhook LAST with `setWebhook` (url
+    `https://approval.<domain>/telegram/interact`, `secret_token=<the secret>`,
+    `allowed_updates=["callback_query"]`); set `APPROVAL_PROVIDER=telegram`.
+    Telegram doesn't sign the body — the secret token IS the auth, so keep it
+    long and random.
+  Collect that provider's values per the secrets protocol into
+  `security/approval/service/.env`, and verify: the sidecar's `/healthz`
+  (compose-internal, e.g. `docker compose exec approval python -c ...`) must
+  show `"channel": "configured"`, and a test POST to its `/gate` must return
   `"notified": true` — that proves a card actually landed in their channel;
-  have the user Deny it. If they opted out instead, set
-  `MCP_REQUIRE_APPROVAL=0` in the root `.env` before `up`.
+  have the user Deny it. If they chose "always allow" instead, set
+  `MCP_REQUIRE_APPROVAL=0` in the root `.env` before `up`; "blocked" just means
+  the tool isn't in the deploy.
 
 ## Finish
 

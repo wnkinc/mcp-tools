@@ -25,15 +25,21 @@ while keeping its domain, tunnel, and credentials.
    `telegram`). On is the default and each path picks its natural provider
    (table above). Off skips the HF/Bedrock setup entirely — set it off only if
    you accept unscreened external content reaching your model context.
-3. **Approvals: channel or off** — human-in-the-loop for the gated tools
-   (`xmcp`, `telegram`): a gated call posts an Approve/Deny card to your
-   approval channel (Slack or Discord — `APPROVAL_PROVIDER` in the sidecar's
-   `.env`; telegram planned) and reports a pending status in chat. Pick a
-   platform the agent does **not** operate — if the agent's tools can read the
-   card and press its buttons, the gate can approve itself. Skipping approvals
-   needs an explicit opt-out (`MCP_REQUIRE_APPROVAL=0` in the root `.env`) —
-   with approvals on but no channel configured, every gated call fails as
-   "approval undeliverable".
+3. **Approvals — needs-approval, always-allow, or blocked.** The server-side
+   version of Claude's per-tool "always allow / needs approval / blocked": the
+   desktop toggle is sticky (approve once and it sticks across every chat) and
+   doesn't reliably apply to custom connectors, so the stack owns the gate. For
+   the gated tools (`xmcp`, `telegram`):
+   - **Needs approval** (default) — a gated write call posts an Approve/Deny
+     card to your approval channel and reports a pending status in chat until
+     you tap it. Choose a provider: `APPROVAL_PROVIDER` = `slack`, `discord`, or
+     `telegram` in the sidecar's `.env`. A channel **must** be configured, or
+     every gated call fails "approval undeliverable" — there is no silent
+     fallback. Pick a platform the agent does **not** operate: if its own tools
+     can read the card and press the buttons, the gate approves itself.
+   - **Always allow** — `MCP_REQUIRE_APPROVAL=0` in the root `.env`; gated write
+     actions run ungated.
+   - **Blocked** — just don't deploy that tool.
 
 ## What every deployment needs (gathered up front)
 

@@ -125,23 +125,29 @@ default). Then restart with the new secrets:
 sudo docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
 ```
 
-## 6. Approvals (Slack required)
+## 6. Approvals — needs-approval, always-allow, or blocked
 
-Slack is the only channel that reaches you — a gated call reports a plain
-pending status in chat and posts an Approve/Deny card to Slack; without Slack
-configured, gated calls report the approval as undeliverable. On the VM:
-`sudo cp security/approval/service/env.example security/approval/service/.env`,
-follow the Slack-app steps inside it (Interactivity Request URL:
-`https://approval.example.com/slack/interact`), and `up -d` again. Prefer
-Discord? Same file: follow its Discord-app steps and set
-`APPROVAL_PROVIDER=discord` (save the Interactions Endpoint URL *after* the
-sidecar is up — Discord validates it immediately). Whichever you pick, use a
-platform your agent doesn't operate — approval is human-in-the-loop, and a
-card the agent's own tools can read and click defeats the purpose.
+The server-side version of Claude's per-tool "always allow / needs approval /
+blocked": the desktop toggle is sticky across chats and doesn't reliably apply
+to custom connectors, so the always-on sidecar owns the gate. The gated tools
+default to **needs approval** — a gated call reports a plain pending status in
+chat and posts an Approve/Deny card to your channel. Pick one posture:
 
-To run a deploy without approvals instead, opt out explicitly with
-`MCP_REQUIRE_APPROVAL=0` in the root `.env` — write actions on the gated tools
-then run ungated.
+- **Needs approval** (default) — on the VM,
+  `sudo cp security/approval/service/env.example security/approval/service/.env`,
+  set `APPROVAL_PROVIDER` to `slack`, `discord`, or `telegram`, follow that
+  provider's steps inside the file (webhook URL
+  `https://approval.example.com/{slack|discord|telegram}/interact`), and `up -d`
+  again. Discord validates its endpoint on save and Telegram's `setWebhook` arms
+  the secret the webhook checks, so run those *after* the sidecar is up. Use a
+  platform your agent doesn't operate — a card its own tools can read and click
+  defeats the gate. Without a channel configured, gated calls report the
+  approval as undeliverable.
+
+- **Always allow** — `MCP_REQUIRE_APPROVAL=0` in the root `.env`; write actions
+  on the gated tools then run ungated.
+
+- **Blocked** — leave that tool out of the `tools` config (step 2).
 
 ## 7. Verify + connect Claude
 

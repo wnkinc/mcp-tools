@@ -1,8 +1,9 @@
 # approval sidecar (:8072)
 
 Single owner of pending approvals + card delivery for the whole stack. Exists
-because a Slack/Discord app delivers every button click to ONE app-level
-webhook URL — with approval state per-tool, only that one tool's buttons
+because a provider app (Slack, Discord, or Telegram) delivers every button click
+to ONE app-level webhook URL — with approval state per-tool, only that one tool's
+buttons
 worked; every other tool's card answered "expired". Centralizing the state
 makes one-click Approve work for any number of tools, and moves the provider
 bot tokens out of every tool container into exactly one place.

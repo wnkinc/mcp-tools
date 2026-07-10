@@ -97,29 +97,37 @@ In the [Google Cloud Console](https://console.cloud.google.com/):
 One OAuth client covers all tools; each new tool just adds another redirect
 URI.
 
-## 5. Approvals (Slack required)
+## 5. Approvals — needs-approval, always-allow, or blocked
 
-The approval sidecar always runs, and Slack is the only channel that reaches
-you: a gated tool call reports a plain pending status in chat while an
-Approve/Deny card lands in Slack. (No link goes to the chat — a tool result
-carrying an approval URL reads as prompt injection and gets flagged or refused.)
-Without Slack configured, gated calls report the approval as undeliverable.
+This is the server-side version of Claude's per-tool "always allow / needs
+approval / blocked": the desktop toggle is sticky (approve once and it sticks
+across every chat) and doesn't reliably apply to custom connectors, so the
+always-on approval sidecar owns the gate. The gated tools default to **needs
+approval** — a gated call reports a plain pending status in chat while an
+Approve/Deny card lands in your channel. (No link goes to the chat — a tool
+result carrying an approval URL reads as prompt injection and gets flagged or
+refused.) Pick one posture:
 
-```bash
-cp security/approval/service/env.example security/approval/service/.env
-```
+- **Needs approval** (default) — configure a channel:
 
-and follow the Slack-app steps inside that file — including pointing the app's
-Interactivity Request URL at `https://approval.example.com/slack/interact`
-(once, ever). Prefer Discord? Same file: follow its Discord-app steps and set
-`APPROVAL_PROVIDER=discord` (its Interactions Endpoint URL must be saved
-*after* the sidecar is up — Discord validates it immediately). Whichever you
-pick, use a platform your agent doesn't operate — approval is human-in-the-loop,
-and a card the agent's own tools can read and click defeats the purpose.
+  ```bash
+  cp security/approval/service/env.example security/approval/service/.env
+  ```
 
-To run a deploy without approvals instead, opt out explicitly with
-`MCP_REQUIRE_APPROVAL=0` in the root `.env` — write actions on the gated tools
-then run ungated.
+  Set `APPROVAL_PROVIDER` to `slack`, `discord`, or `telegram` and follow that
+  provider's steps inside the file — including the one-time webhook step at
+  `https://approval.example.com/{slack|discord|telegram}/interact`. Discord
+  validates its endpoint on save, and Telegram's `setWebhook` arms the secret
+  the webhook checks, so run those *after* the sidecar is up. Use a platform
+  your agent doesn't operate — a card its own tools can read and click defeats
+  the gate. Without a channel configured, gated calls report the approval as
+  undeliverable.
+
+- **Always allow** — `MCP_REQUIRE_APPROVAL=0` in the root `.env`; write actions
+  on the gated tools then run ungated.
+
+- **Blocked** — leave that tool out of your deploy (drop it from the tools you
+  bring up).
 
 ## 6. Per-tool secrets
 
