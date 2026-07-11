@@ -4,49 +4,51 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
+  /* Everything sits on TRANSPARENT backgrounds so the widget adopts the chat surface.
+     All grays are semi-transparent so they read correctly on any host background;
+     only text colors switch with the theme. */
   :root {
-    --surface:#fbfbfa; --card:#ffffff; --ink:#0b0b0b; --ink-2:#55534e; --muted:#8a8882;
-    --border:rgba(11,11,11,0.12); --line:#ece9e3;
-    --ok:#0a8f0a; --ok-bg:#eef8ee; --ok-bd:#bfe6bf;
-    --no:#c8362f; --no-bg:#fbeeed; --no-bd:#f0c7c4;
-    --warn:#8a6d00; --warn-bg:#fbf5e3; color-scheme:light;
+    --ink:#1c1c1a; --ink-2:#5d5b55; --muted:#84827b;
+    --border:rgba(0,0,0,0.13); --tint:rgba(0,0,0,0.045);
+    --btn:#1f1e1c; --btn-ink:#fbfbfa;
+    --ok:#1a7f37; --no:#b3261e; --warn:#9a6700; color-scheme:light;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --surface:#191918; --card:#232322; --ink:#f4f3f1; --ink-2:#c3c2b7; --muted:#8a8a86;
-      --border:rgba(255,255,255,0.14); --line:#33322f;
-      --ok:#4cc24c; --ok-bg:#14251a; --ok-bd:#245f2a;
-      --no:#e8726b; --no-bg:#2a1716; --no-bd:#5c2b28;
-      --warn:#e5c25a; --warn-bg:#2a2410; color-scheme:dark; }
+    :root { --ink:#ededeb; --ink-2:#b8b7af; --muted:#8d8c85;
+      --border:rgba(255,255,255,0.16); --tint:rgba(255,255,255,0.06);
+      --btn:#ededeb; --btn-ink:#1c1c1a;
+      --ok:#5bb96a; --no:#e5645c; --warn:#d4a72c; color-scheme:dark; }
   }
-  html,body{margin:0}
+  html,body{margin:0;background:transparent}
   /* Start with NO padding and the card hidden: a gated tool is tagged as a widget tool,
      so the host draws this iframe on EVERY call to it (incl. the approved re-run). We
      reveal only for an actual pending approval -> the success re-run never flashes. */
-  body{font:13.5px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--surface);color:var(--ink);padding:0}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  body{font:13.5px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);padding:0}
+  .card{border:1px solid var(--border);border-radius:12px;overflow:hidden}
   .body{padding:14px 16px}
-  .head{display:flex;align-items:center;gap:8px;font-weight:650;font-size:14px}
-  .head .dot{font-size:15px}
+  .head{font-weight:600;font-size:14px}
   .sub{color:var(--muted);font-size:12px;margin:2px 0 10px}
   .action{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--ink-2);
-    background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:9px 11px;word-break:break-word}
+    background:var(--tint);border-radius:8px;padding:9px 11px;word-break:break-word}
   .btns{display:flex;gap:8px;margin-top:12px}
-  button{flex:1;font:inherit;font-weight:600;padding:9px 12px;border-radius:10px;border:1px solid var(--border);cursor:pointer;transition:filter .1s}
-  button:hover{filter:brightness(0.97)}
-  button:active{filter:brightness(0.93)}
-  button:disabled{opacity:.5;cursor:default}
-  .approve{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-bd)}
-  .deny{background:var(--no-bg);color:var(--no);border-color:var(--no-bd)}
+  button{flex:1;font:inherit;font-weight:600;padding:8px 12px;border-radius:8px;border:1px solid transparent;
+    cursor:pointer;transition:opacity .1s,background .1s}
+  button:disabled{opacity:.45;cursor:default}
+  .approve{background:var(--btn);color:var(--btn-ink)}
+  .approve:hover:enabled{opacity:.85}
+  .deny{background:transparent;color:var(--ink-2);border-color:var(--border)}
+  .deny:hover:enabled{background:var(--tint)}
+  button:active:enabled{opacity:.7}
   .inline-err{margin-top:10px;font-size:12px;color:var(--no)}
   /* decided panel */
-  .result{padding:14px 16px;border-top:1px solid var(--line)}
-  .result .status{display:flex;align-items:center;gap:8px;font-weight:650;font-size:14px}
+  .result{padding:14px 16px;border-top:1px solid var(--border)}
+  .result .status{font-weight:600;font-size:14px}
   .result.ok .status{color:var(--ok)} .result.no .status{color:var(--no)} .result.warn .status{color:var(--warn)}
   .result .instruct{margin-top:8px;color:var(--ink-2);font-size:12.5px}
   .result .instruct b{color:var(--ink)}
   .reply{display:inline-block;margin-top:8px;font-family:ui-monospace,monospace;font-size:12.5px;
-    background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:4px 9px}
-  details{border-top:1px solid var(--line)}
+    background:var(--tint);border-radius:6px;padding:4px 9px}
+  details{border-top:1px solid var(--border)}
   summary{cursor:pointer;color:var(--muted);font-size:11px;padding:8px 16px;list-style:none}
   summary::-webkit-details-marker{display:none}
   #diag{font-family:ui-monospace,monospace;font-size:11px;white-space:pre-wrap;color:var(--muted);
@@ -61,12 +63,12 @@
 </script>
 <div class="card" id="card" hidden>
   <div class="body" id="pending">
-    <div class="head"><span class="dot">⏸</span> Approval requested</div>
+    <div class="head">Approval requested</div>
     <div class="sub">A tool needs your OK before it runs.</div>
     <div class="action" id="action">…</div>
     <div class="btns">
-      <button class="approve" id="approve" type="button">✅ Approve</button>
-      <button class="deny" id="deny" type="button">❌ Deny</button>
+      <button class="approve" id="approve" type="button">Approve</button>
+      <button class="deny" id="deny" type="button">Deny</button>
     </div>
     <div class="inline-err" id="inlineErr" hidden></div>
   </div>
@@ -130,11 +132,11 @@ async function decide(decision) {
   // No composer text is ever injected (it trips claude.ai's prompt-injection warning),
   // so the widget tells the USER to nudge the assistant onward.
   if (decision === "approve") {
-    showResult("ok", "✅&nbsp;<b>Approved</b>",
+    showResult("ok", "✓&nbsp;&nbsp;Approved",
       'The action is cleared to run. <b>Reply to the assistant so it continues</b> — e.g. ' +
       '<span class="reply">go ahead</span>');
   } else {
-    showResult("no", "❌&nbsp;<b>Denied</b>",
+    showResult("no", "✕&nbsp;&nbsp;Denied",
       'The action is blocked. <b>Tell the assistant it was denied</b> — e.g. ' +
       '<span class="reply">denied — don\'t send it</span>');
   }
@@ -145,7 +147,7 @@ function showInlineErr(msg) {
   $("deny").disabled = false;
   const e = $("inlineErr");
   e.hidden = false;
-  e.textContent = "⚠ " + msg;
+  e.textContent = msg;
 }
 
 const app = new App({ name: "approval-widget", version: "0.2.0" }, {}, { autoResize: true });
