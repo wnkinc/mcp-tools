@@ -102,7 +102,17 @@ def main() -> None:
     # Telegram); the base compose flips it off for local dev, the overlay on.
     # With the read-only surface every exposed tool is exempt, so the gate only
     # bites once TELEGRAM_EXPOSED_TOOLS=all exposes the write tools.
-    serve(build_proxy(), port=port, untrusted_output=True, require_approval=True)
+    # stateless_http: a dropped claude.ai session once wedged the shared stdio pipe
+    # and hung every later connect at tools/list; with no server-side HTTP session
+    # there's nothing to wedge. Telegram state lives in the long-running child, not
+    # the session.
+    serve(
+        build_proxy(),
+        port=port,
+        untrusted_output=True,
+        require_approval=True,
+        stateless_http=True,
+    )
 
 
 if __name__ == "__main__":

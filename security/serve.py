@@ -88,6 +88,7 @@ def serve(
     host: str | None = None,
     untrusted_output: bool = False,
     require_approval: bool = False,
+    stateless_http: bool = False,
     guardrail_source: str | None = None,
     approval_exempt_env: str = "MCP_APPROVAL_EXEMPT",
 ) -> None:
@@ -108,6 +109,7 @@ def serve(
     # resolve to a running screener or every call fails closed at the middleware.
     require_approval = _env_override("MCP_REQUIRE_APPROVAL", require_approval)
     untrusted_output = _env_override("MCP_UNTRUSTED_OUTPUT", untrusted_output)
+    stateless_http = _env_override("MCP_STATELESS_HTTP", stateless_http)
 
     # SPIKE (throwaway, SPIKE_APPROVAL_WIDGET=1): register the in-chat approval-widget
     # probe. Runs BEFORE the middleware blocks so it can extend the exempt allowlists its
@@ -178,6 +180,11 @@ def serve(
     if transport == "stdio":
         mcp.run(transport="stdio")
     elif transport == "http":
-        mcp.run(transport="http", host=host, port=port)
+        # stateless_http: every request is self-contained -- no server-side session to
+        # lose. Opted into by tools whose sessions churn (reconnects, container
+        # recreates) and whose state lives elsewhere anyway (telegram's stdio child).
+        # Passed only when on so an off tool runs exactly the stock code path.
+        kwargs = {"stateless_http": True} if stateless_http else {}
+        mcp.run(transport="http", host=host, port=port, **kwargs)
     else:
         raise ValueError(f"Unsupported MCP_TRANSPORT={transport!r}; expected 'http' or 'stdio'.")
