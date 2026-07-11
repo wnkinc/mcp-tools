@@ -280,14 +280,18 @@ services:
       MCP_HOST: 0.0.0.0
       MCP_TRANSPORT: http
       MCP_AUTH_ENABLED: "0"
+      MCP_REQUIRE_APPROVAL: "0"
+      APPROVAL_URL: http://approval:8072
       HTTPS_PROXY: http://egress:3134
       HTTP_PROXY: http://egress:3134
-      NO_PROXY: localhost,127.0.0.1
+      NO_PROXY: approval,localhost,127.0.0.1
     volumes:
       - gatekeeper-state:/app/state
     networks:
       - internal
     depends_on:
+      approval:
+        condition: service_started
       egress:
         condition: service_started
 

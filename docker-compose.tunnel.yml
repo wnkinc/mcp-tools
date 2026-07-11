@@ -60,6 +60,17 @@ services:
       MCP_UNTRUSTED_OUTPUT: "1"
       MCP_PUBLIC_URL: https://telegram.${MCP_DOMAIN}
 
+  # The gatekeeper flips other tools' approval requirement. set_gating is ALWAYS gated
+  # (the in-chat widget is its own approval channel, so it needs no Slack/Discord/etc),
+  # and it shows the card via SPIKE_APPROVAL_WIDGET -> APPROVAL_PUBLIC_URL.
+  gatekeeper:
+    environment:
+      MCP_AUTH_ENABLED: "1"
+      MCP_REQUIRE_APPROVAL: "1"
+      SPIKE_APPROVAL_WIDGET: "1"
+      APPROVAL_PUBLIC_URL: https://approval.${MCP_DOMAIN}
+      MCP_PUBLIC_URL: https://gatekeeper.${MCP_DOMAIN}
+
 # INGRESS routing, committed here so nothing public runs that isn't in the repo. Compose
 # interpolates ${MCP_DOMAIN}/${TUNNEL_ID} from the root .env and mounts the rendered
 # file into the sidecar -- the committed routing stays generic. cloudflared dials OUT to
@@ -84,6 +95,8 @@ configs:
           service: http://lean:8064
         - hostname: telegram.${MCP_DOMAIN}
           service: http://telegram:8063
+        - hostname: gatekeeper.${MCP_DOMAIN}
+          service: http://gatekeeper:8065
         # The approval sidecar's public pages: the capability-token approve page and
         # the provider interactivity webhook (signature/secret-verified). Path-routed
         # to the one sidecar, so point whichever provider you use at its path:

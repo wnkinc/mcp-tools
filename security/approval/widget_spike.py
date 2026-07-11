@@ -112,13 +112,17 @@ def register_widget_spike(mcp) -> None:  # type: ignore[no-untyped-def]
         meta={"csp": _csp, "ui": {"csp": _csp}},
     )(lambda: _widget_html())
 
-    async def approval_probe(action: str = "demo action") -> str:
-        """A harmless gated test action. The first call surfaces the in-chat approval
-        card; after you approve it and reply, this re-runs and returns the line below
-        (a real gated tool -- e.g. send_message -- would perform its action here)."""
-        return f"✅ approval_probe ran — a real gated tool would have executed {action!r} here."
+    # The harmless gated TEST tool lives only on telegram (where we validate the flow);
+    # other widget-mode servers (e.g. gatekeeper) get the widget infra without it.
+    if mcp.name == "telegram":
 
-    mcp.tool(name="approval_probe")(approval_probe)
+        async def approval_probe(action: str = "demo action") -> str:
+            """A harmless gated test action. The first call surfaces the in-chat approval
+            card; after you approve it and reply, this re-runs and returns the line below
+            (a real gated tool -- e.g. send_message -- would perform its action here)."""
+            return f"✅ approval_probe ran — a real gated tool would have run {action!r} here."
+
+        mcp.tool(name="approval_probe")(approval_probe)
 
     # THE one shared piece: tag the GATED tools so their pending result renders the
     # approval card -- same gated decision (baseline + live overrides) the gate uses.
