@@ -153,14 +153,18 @@ def serve(
                 exempt=_csv_set(os.getenv("MCP_GUARDRAIL_EXEMPT")),
             )
         )
-        # The guardrail nulls each result's structuredContent (screening replaces it with
-        # text). A tool that still advertises an outputSchema then violates the MCP rule
-        # "outputSchema => conforming structuredContent", so the Claude connector rejects
-        # the call with an output-validation error. Strip schemas from these guardrailed
-        # tools. (Trusted tools keep their outputSchema -- they still return matching
-        # structuredContent, so it's valid and useful.) Escape hatch: MCP_KEEP_OUTPUT_SCHEMA=1.
-        if not _is_truthy(os.getenv("MCP_KEEP_OUTPUT_SCHEMA")):
-            _strip_local_output_schemas(mcp)
+
+    # A tool that advertises an outputSchema must return conforming structuredContent on
+    # EVERY result (MCP rule). Two of our layers return a result WITHOUT it: the guardrail
+    # nulls structuredContent when screening, and a gated call short-circuits to a plain
+    # pending status. Either way an advertised schema makes the Claude connector reject the
+    # call with an output-validation error -- so strip local schemas whenever approval or
+    # guardrail is on. (Fully-trusted, ungated tools keep their schema.) Escape hatch:
+    # MCP_KEEP_OUTPUT_SCHEMA=1.
+    if (require_approval or untrusted_output) and not _is_truthy(
+        os.getenv("MCP_KEEP_OUTPUT_SCHEMA")
+    ):
+        _strip_local_output_schemas(mcp)
 
     auth = build_oauth_provider()
     if auth is not None:
