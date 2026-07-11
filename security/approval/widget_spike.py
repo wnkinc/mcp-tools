@@ -32,12 +32,14 @@ _WIDGETS = Path(__file__).resolve().parent / "widgets"
 _html_cache: str | None = None
 
 
-def _widget_uri() -> str:
-    # Content-hashed URI: any change to the widget HTML => new URI => the connector
-    # can't serve a stale cached copy (it caches resources by URI). Kills the
-    # "old widget rendered" confusion during iteration.
+def _widget_uri(source: str) -> str:
+    # Per-SOURCE + content-hashed URI. The source keeps each connector's widget URI
+    # distinct (the host associates a ui:// URI with one connector -- a shared URI
+    # renders only on the first one, so the gatekeeper's card wouldn't show while
+    # telegram's did). The hash busts the connector's per-URI resource cache on any
+    # widget change.
     h = hashlib.sha1(_widget_html().encode()).hexdigest()[:10]  # noqa: S324 - cache-bust, not security
-    return f"ui://approve.{h}.html"
+    return f"ui://approve.{source}.{h}.html"
 
 
 def _public_base() -> str:
@@ -103,7 +105,7 @@ def register_widget_spike(mcp) -> None:  # type: ignore[no-untyped-def]
     # (trusted) result isn't wrapped.
     _extend_env_csv("MCP_GUARDRAIL_EXEMPT", "approval_probe")
 
-    uri = _widget_uri()
+    uri = _widget_uri(mcp.name)
     _csp = {"connectDomains": [b for b in [_public_base()] if b]}
     mcp.resource(
         uri,
