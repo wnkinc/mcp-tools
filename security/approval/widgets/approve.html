@@ -26,8 +26,7 @@
   body{font:13.5px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);padding:0}
   .card{border:1px solid var(--border);border-radius:12px;overflow:hidden}
   .body{padding:14px 16px}
-  .head{font-weight:600;font-size:14px}
-  .sub{color:var(--muted);font-size:12px;margin:2px 0 10px}
+  .head{font-weight:600;font-size:14px;margin-bottom:10px}
   .action{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--ink-2);
     background:var(--tint);border-radius:8px;padding:9px 11px;word-break:break-word}
   .btns{display:flex;gap:8px;margin-top:12px}
@@ -46,8 +45,12 @@
   .result.ok .status{color:var(--ok)} .result.no .status{color:var(--no)} .result.warn .status{color:var(--warn)}
   .result .instruct{margin-top:8px;color:var(--ink-2);font-size:12.5px}
   .result .instruct b{color:var(--ink)}
-  .reply{display:inline-block;margin-top:8px;font-family:ui-monospace,monospace;font-size:12.5px;
-    background:var(--tint);border-radius:6px;padding:4px 9px}
+  /* click-to-copy reply chip (overrides the shared button rule) */
+  .reply{display:inline-block;flex:none;margin:0 2px;font-family:ui-monospace,monospace;font-size:12.5px;
+    font-weight:500;color:var(--ink);background:var(--tint);border:1px solid var(--border);border-radius:6px;
+    padding:3px 9px;cursor:pointer}
+  .reply:hover{background:var(--border)}
+  .reply.copied{color:var(--muted)}
   details{border-top:1px solid var(--border)}
   summary{cursor:pointer;color:var(--muted);font-size:11px;padding:8px 16px;list-style:none}
   summary::-webkit-details-marker{display:none}
@@ -64,7 +67,6 @@
 <div class="card" id="card" hidden>
   <div class="body" id="pending">
     <div class="head">Approval requested</div>
-    <div class="sub">A tool needs your OK before it runs.</div>
     <div class="action" id="action">…</div>
     <div class="btns">
       <button class="approve" id="approve" type="button">Approve</button>
@@ -97,13 +99,32 @@ function parsePayload(text) {
   return null;  // no marker -> not a pending request (e.g. the approved re-run's result)
 }
 
-function showResult(kind, statusHtml, instructHtml) {
+function showResult(kind, statusText, replyWord, tail) {
   $("pending").hidden = true;
   const r = $("result");
   r.hidden = false;
   r.className = "result " + kind;
-  $("rstatus").innerHTML = statusHtml;
-  $("rinstruct").innerHTML = instructHtml;
+  $("rstatus").textContent = statusText;
+  // "Reply [chip] to agent ..." — the chip copies the reply word on click.
+  const inst = $("rinstruct");
+  inst.replaceChildren("Reply ");
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "reply";
+  chip.textContent = replyWord;
+  chip.title = "Copy";
+  chip.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(replyWord); }
+    catch {  // clipboard API can be blocked in sandboxed iframes
+      const t = document.createElement("textarea");
+      t.value = replyWord; document.body.append(t); t.select();
+      document.execCommand("copy"); t.remove();
+    }
+    chip.classList.add("copied");
+    chip.textContent = "Copied";
+    setTimeout(() => { chip.textContent = replyWord; chip.classList.remove("copied"); }, 1200);
+  });
+  inst.append(chip, " to agent " + tail);
 }
 
 async function decide(decision) {
@@ -132,13 +153,9 @@ async function decide(decision) {
   // No composer text is ever injected (it trips claude.ai's prompt-injection warning),
   // so the widget tells the USER to nudge the assistant onward.
   if (decision === "approve") {
-    showResult("ok", "✓&nbsp;&nbsp;Approved",
-      'The action is cleared to run. <b>Reply to the assistant so it continues</b> — e.g. ' +
-      '<span class="reply">go ahead</span>');
+    showResult("ok", "✓  Approved", "Approved", "to continue with tool use.");
   } else {
-    showResult("no", "✕&nbsp;&nbsp;Denied",
-      'The action is blocked. <b>Tell the assistant it was denied</b> — e.g. ' +
-      '<span class="reply">denied — don\'t send it</span>');
+    showResult("no", "✕  Denied", "Denied", "to stop this tool use.");
   }
 }
 
