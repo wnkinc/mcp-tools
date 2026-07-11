@@ -122,8 +122,11 @@ function showResult(kind, statusText, replyWord, tail) {
   r.hidden = false;
   r.className = "result " + kind;
   $("rstatus").textContent = statusText;
-  // "Reply [chip] to agent ..." — the chip copies the reply word on click.
+  // No reply word (deny) -> just the status line, no instruction.
   const inst = $("rinstruct");
+  inst.hidden = !replyWord;
+  if (!replyWord) return;
+  // "Reply [chip] to continue." — the chip copies the reply word on click.
   inst.replaceChildren("Reply ");
   const chip = document.createElement("button");
   chip.type = "button";
@@ -172,7 +175,7 @@ async function decide(decision) {
   if (decision === "approve") {
     showResult("ok", "✓  Approved", "Approved", "to continue.");
   } else {
-    showResult("no", "✕  Denied", "Denied", "to stop.");
+    showResult("no", "✕  Denied");
   }
 }
 
