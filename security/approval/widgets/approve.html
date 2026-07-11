@@ -124,7 +124,7 @@ function showResult(kind, statusText, replyWord, tail) {
     chip.textContent = "Copied";
     setTimeout(() => { chip.textContent = replyWord; chip.classList.remove("copied"); }, 1200);
   });
-  inst.append(chip, " to agent " + tail);
+  inst.append(chip, " " + tail);
 }
 
 async function decide(decision) {
@@ -153,9 +153,9 @@ async function decide(decision) {
   // No composer text is ever injected (it trips claude.ai's prompt-injection warning),
   // so the widget tells the USER to nudge the assistant onward.
   if (decision === "approve") {
-    showResult("ok", "✓  Approved", "Approved", "to continue with tool use.");
+    showResult("ok", "✓  Approved", "Approved", "to continue.");
   } else {
-    showResult("no", "✕  Denied", "Denied", "to stop this tool use.");
+    showResult("no", "✕  Denied", "Denied", "to stop.");
   }
 }
 
