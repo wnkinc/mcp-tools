@@ -8,7 +8,6 @@ with the spec fetch faked -- which also pins the from_openapi outputSchema strip
 
 import asyncio
 import importlib.util
-import os
 from pathlib import Path
 
 import pytest
@@ -30,7 +29,6 @@ GRANT_ENV = [
     "X_OAUTH_ACCESS_TOKEN",
     "X_OAUTH_ACCESS_TOKEN_SECRET",
     "MCP_KEEP_OUTPUT_SCHEMA",
-    "MCP_APPROVAL_EXEMPT",
 ]
 
 OAUTH1_ENV = {
@@ -272,25 +270,6 @@ def test_annotations_split_reads_from_writes(monkeypatch):
     delete = tools["deleteTweetById"].annotations
     assert delete.readOnlyHint is False
     assert delete.destructiveHint is True
-
-
-def test_approval_exemptions_default_to_the_read_surface(monkeypatch):
-    _fake_mixed_spec_fetch(monkeypatch)
-    monkeypatch.setenv("X_BEARER_TOKEN", "token")
-    monkeypatch.setenv("X_API_TOOL_ALLOWLIST", "all")
-    monkeypatch.setenv("X_API_ALLOW_WRITES", "1")
-    server.create_mcp()
-    exempt = set(os.environ["MCP_APPROVAL_EXEMPT"].split(","))
-    # Reads flow unapproved; the exposed writes must NOT be exempt.
-    assert exempt == {"searchPostsRecent"}
-
-
-def test_approval_exemptions_env_wins(monkeypatch):
-    _fake_mixed_spec_fetch(monkeypatch)
-    monkeypatch.setenv("X_BEARER_TOKEN", "token")
-    monkeypatch.setenv("MCP_APPROVAL_EXEMPT", "handPicked")
-    server.create_mcp()
-    assert os.environ["MCP_APPROVAL_EXEMPT"] == "handPicked"
 
 
 # --- OAuth1 user-context auth (upstream's signing, portal-minted tokens) -----------

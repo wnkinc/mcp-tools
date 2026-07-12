@@ -45,59 +45,6 @@ def test_child_env_passes_secrets_through(monkeypatch):
     assert server.build_child_env()["TELEGRAM_SESSION_STRING"] == "sess-abc"
 
 
-# --- approval exemptions: reads flow, writes wait for a human -----------------------
-
-
-def test_exempt_list_is_reads_only():
-    names = server.load_approval_exemptions()
-    assert len(names) == 47
-    assert "get_me" in names and "list_contacts" in names
-    # No write-shaped names may ever be exempt.
-    write_prefixes = (
-        "send",
-        "delete",
-        "edit",
-        "join",
-        "leave",
-        "create",
-        "add",
-        "remove",
-        "ban",
-        "unban",
-        "promote",
-        "demote",
-        "mute",
-        "unmute",
-        "pin",
-        "unpin",
-        "forward",
-        "archive",
-        "unarchive",
-        "block",
-        "unblock",
-        "import",
-        "update",
-        "set",
-        "mark",
-        "reply",
-        "invite",
-    )
-    assert not [n for n in names if n.startswith(write_prefixes)]
-    # Upstream mislabels ExportChatInviteRequest callers as read-only; they stay gated.
-    assert "get_invite_link" not in names and "export_chat_invite" not in names
-
-
-def test_exemptions_default_env_but_yield_to_explicit(monkeypatch):
-    monkeypatch.delenv("MCP_APPROVAL_EXEMPT", raising=False)
-    server.apply_approval_exemptions()
-    import os
-
-    assert "get_me" in os.environ["MCP_APPROVAL_EXEMPT"].split(",")
-    monkeypatch.setenv("MCP_APPROVAL_EXEMPT", "only_this")
-    server.apply_approval_exemptions()
-    assert os.environ["MCP_APPROVAL_EXEMPT"] == "only_this"
-
-
 # --- schema strip: the guardrail/connector contract ---------------------------------
 
 

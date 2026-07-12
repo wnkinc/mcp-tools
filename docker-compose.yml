@@ -99,10 +99,15 @@ services:
     environment:
       APPROVAL_HOST: 0.0.0.0
       APPROVAL_PORT: 8072
+      # The sidecar is the sole authority on tool modes; the operator's choices
+      # must survive a restart. /app/state is the image's app-owned writable dir.
+      APPROVAL_STATE_FILE: /app/state/state.json
       # Slack posts leave through the egress wall like everything else.
       HTTPS_PROXY: http://egress:3132
       HTTP_PROXY: http://egress:3132
       NO_PROXY: localhost,127.0.0.1
+    volumes:
+      - approval-state:/app/state
     networks:
       - internal
     depends_on:
@@ -303,6 +308,7 @@ networks:
   edge: {}
 
 volumes:
+  approval-state:
   gatekeeper-state:
   telegram-state:
   lean-state:

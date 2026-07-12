@@ -262,29 +262,6 @@ def filter_openapi_spec(spec: dict) -> dict:
     return filtered
 
 
-def collect_read_operation_ids(spec: dict) -> set[str]:
-    """The GET operationIds of a (filtered) spec: the tools safe to run unapproved."""
-    ops: set[str] = set()
-    for item in spec.get("paths", {}).values():
-        if not isinstance(item, dict):
-            continue
-        operation = item.get("get")
-        if isinstance(operation, dict) and isinstance(operation.get("operationId"), str):
-            ops.add(operation["operationId"])
-    return ops
-
-
-def apply_approval_exemptions(filtered_spec: dict) -> None:
-    """Default MCP_APPROVAL_EXEMPT to the read surface (env wins if set).
-
-    Same contract as the telegram tool's approval-exempt.txt, but DERIVED from the
-    filtered spec instead of maintained by hand: reads flow without out-of-band
-    approval, while any exposed write (X_API_ALLOW_WRITES=1) blocks on the gate.
-    """
-    exempt = collect_read_operation_ids(filtered_spec)
-    os.environ.setdefault("MCP_APPROVAL_EXEMPT", ",".join(sorted(exempt)))
-
-
 def build_annotations(route) -> ToolAnnotations:  # type: ignore[no-untyped-def]
     """MCP annotations for an OpenAPI-derived tool, from its HTTP method.
 
@@ -342,8 +319,6 @@ def create_mcp() -> FastMCP:
 
     spec = load_openapi_spec()
     filtered_spec = filter_openapi_spec(spec)
-    # Must run before serve() builds the approval middleware (main calls us first).
-    apply_approval_exemptions(filtered_spec)
     comma_params = collect_comma_params(filtered_spec)
     print_tool_list(filtered_spec)
 

@@ -32,6 +32,7 @@ Fail closed: if the sidecar is unreachable, the gated action does NOT run.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -41,7 +42,7 @@ import httpx
 from fastmcp.server.middleware import Middleware
 from fastmcp.tools.tool import ToolResult
 
-from security.approval.gating import fetch_overrides, mode_for
+from security.approval.gating import fetch_modes, mode_for
 
 LOGGER = logging.getLogger("mcp_tools.approval")
 
@@ -63,22 +64,22 @@ def _call_key(tool_name: str, args: dict) -> str:
 
 
 class ApprovalMiddleware(Middleware):
-    """Gate every (non-exempt) tool call behind the approval sidecar.
+    """Enforce each tool's sidecar-held mode (always_allow / needs_approval / blocked).
 
-    The first call to a (tool, args) combo short-circuits with an approval request and
-    does NOT run the tool; once the human approves (page or Slack), re-calling the same
-    tool with the same args runs it -- no token to thread through the model.
+    The sidecar is the sole authority (see security/approval/gating.py): no stored
+    choice means always_allow. A needs_approval call short-circuits: the first
+    (tool, args) call requests an approval and does NOT run the tool; once the human
+    approves (page or card), re-calling the same tool with the same args runs it --
+    no token to thread through the model.
     """
 
     def __init__(
         self,
-        exempt: set[str] | None = None,
         source: str = "mcp",
         approval_url: str | None = None,
         timeout: float = 10.0,
         widget: bool = False,
     ) -> None:
-        self._exempt = exempt or set()
         self.source = source
         self.approval_url = (
             approval_url or os.getenv("APPROVAL_URL", "http://127.0.0.1:8072")
@@ -89,24 +90,55 @@ class ApprovalMiddleware(Middleware):
         # can't fetch) as a JSON payload the widget reads; the tool is tagged elsewhere
         # (WidgetMetaMiddleware) so this result renders the card. No out-of-band card needed.
         self._widget = widget
+        self._catalog_sent: str | None = None  # last successfully registered payload
+
+    async def _register_catalog(self, tools) -> None:  # type: ignore[no-untyped-def]
+        """Publish the FULL tool catalog to the sidecar (the operator's unfiltered
+        view -- the gatekeeper and the permissions widget read it from there).
+        Best-effort and idempotent: skipped while unchanged, and a down sidecar
+        never breaks tools/list."""
+        payload = {
+            "source": self.source,
+            "tools": [
+                {
+                    "name": t.name,
+                    "description": t.description or "",
+                    "read_only": bool(getattr(t.annotations, "readOnlyHint", False)),
+                }
+                for t in tools
+            ],
+        }
+        blob = json.dumps(payload, sort_keys=True)
+        if blob == self._catalog_sent:
+            return
+        with contextlib.suppress(Exception):
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(f"{self.approval_url}/catalog", json=payload)
+            resp.raise_for_status()
+            self._catalog_sent = blob
 
     async def on_list_tools(self, context, call_next):  # type: ignore[no-untyped-def]
-        # Hidden tools are filtered from the advertised list. The connector caches
-        # tools/list until refreshed, so this is cosmetic latency-wise -- the
+        # This is the one place the full list passes by: register it as the catalog,
+        # then filter blocked tools from what Claude sees. The connector caches
+        # tools/list until refreshed, so the filter is cosmetic latency-wise -- the
         # call-time refusal below is the actual gate.
         tools = await call_next(context)
-        overrides = await fetch_overrides(self.source, self.approval_url)
-        return [t for t in tools if mode_for(t.name, self._exempt, overrides) != "hidden"]
+        await self._register_catalog(tools)
+        modes = await fetch_modes(self.source, self.approval_url)
+        if modes is None:  # nothing known -> can't tell what's blocked; calls fail closed
+            return tools
+        return [t for t in tools if mode_for(t.name, modes) != "blocked"]
 
     async def on_call_tool(self, context, call_next):  # type: ignore[no-untyped-def]
         tool_name = context.message.name
-        # Baseline exempt + live sidecar overrides (the gatekeeper can flip a tool
-        # free/gated/hidden at runtime). Override wins; a fetch blip keeps the last-known.
-        overrides = await fetch_overrides(self.source, self.approval_url)
-        mode = mode_for(tool_name, self._exempt, overrides)
-        if mode == "free":
+        # Live sidecar modes (the gatekeeper flips them at runtime). A fetch blip
+        # keeps the last-known; a never-answered sidecar means everything below
+        # treats the tool as needs_approval and the gate itself fails closed.
+        modes = await fetch_modes(self.source, self.approval_url)
+        mode = mode_for(tool_name, modes)
+        if mode == "always_allow":
             return await call_next(context)
-        if mode == "hidden":
+        if mode == "blocked":
             # Disabled outright: no approval path, and a stale client tool list must
             # not be able to run it. Same wording rules as pending: bare facts only.
             return _note(

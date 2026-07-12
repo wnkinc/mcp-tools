@@ -90,7 +90,6 @@ def serve(
     require_approval: bool = False,
     stateless_http: bool = False,
     guardrail_source: str | None = None,
-    approval_exempt_env: str = "MCP_APPROVAL_EXEMPT",
 ) -> None:
     """Apply the shared security layers to ``mcp`` and run it (transport via env).
 
@@ -112,19 +111,19 @@ def serve(
     stateless_http = _env_override("MCP_STATELESS_HTTP", stateless_http)
 
     # SPIKE (throwaway, SPIKE_APPROVAL_WIDGET=1): register the in-chat approval-widget
-    # probe. Runs BEFORE the middleware blocks so it can extend the exempt allowlists its
-    # helper tools rely on (MCP_APPROVAL_EXEMPT / MCP_GUARDRAIL_EXEMPT).
+    # probe. Runs BEFORE the middleware blocks so it can extend the guardrail exempt
+    # allowlist its helper tool relies on (MCP_GUARDRAIL_EXEMPT).
     if _is_truthy(os.getenv("SPIKE_APPROVAL_WIDGET")):
         from security.approval.widget_spike import register_widget_spike
 
         register_widget_spike(mcp)
 
     if require_approval:
-        # State + the human-facing pages live in the approval sidecar (APPROVAL_URL);
-        # this middleware is only the per-tool client (source scopes its approvals).
+        # State + the human-facing pages live in the approval sidecar (APPROVAL_URL) --
+        # including every tool's mode; this middleware is only the per-tool client
+        # (source scopes its approvals and its catalog registration).
         mcp.add_middleware(
             ApprovalMiddleware(
-                exempt=_csv_set(os.getenv(approval_exempt_env)),
                 source=mcp.name,
                 widget=_is_truthy(os.getenv("SPIKE_APPROVAL_WIDGET")),
             )

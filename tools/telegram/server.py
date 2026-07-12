@@ -32,23 +32,6 @@ from security.serve import serve  # noqa: E402
 # The sha256-verified checkout the Dockerfile stages; overridable for dev/tests.
 ENGINE_DIR = os.getenv("TELEGRAM_ENGINE_DIR", "/app/vendor/telegram-mcp")
 
-# The engine's read-only tools (minus upstream mislabels -- see the file header):
-# these skip the approval gate so reads flow freely while writes wait for a human.
-APPROVAL_EXEMPT_FILE = Path(__file__).with_name("approval-exempt.txt")
-
-
-def load_approval_exemptions(path: Path = APPROVAL_EXEMPT_FILE) -> set[str]:
-    return {
-        line.strip()
-        for line in path.read_text().splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    }
-
-
-def apply_approval_exemptions() -> None:
-    """Default MCP_APPROVAL_EXEMPT from the committed list (env wins if set)."""
-    os.environ.setdefault("MCP_APPROVAL_EXEMPT", ",".join(sorted(load_approval_exemptions())))
-
 
 class StripOutputSchemas(Middleware):
     """Null proxied tools' outputSchema at list time.
@@ -97,11 +80,11 @@ def build_proxy(engine_dir: str = ENGINE_DIR):  # type: ignore[no-untyped-def]
 
 def main() -> None:
     port = int(os.getenv("MCP_PORT", "8063"))
-    apply_approval_exemptions()
     # require_approval declares this tool's intent (its writes act as YOU on
     # Telegram); the base compose flips it off for local dev, the overlay on.
-    # With the read-only surface every exposed tool is exempt, so the gate only
-    # bites once TELEGRAM_EXPOSED_TOOLS=all exposes the write tools.
+    # Which tools actually gate is the approval sidecar's stored modes (the sole
+    # authority -- everything defaults to always_allow until the operator changes
+    # it via the gatekeeper).
     # stateless_http: a dropped claude.ai session once wedged the shared stdio pipe
     # and hung every later connect at tools/list; with no server-side HTTP session
     # there's nothing to wedge. Telegram state lives in the long-running child, not

@@ -614,35 +614,104 @@ async def telegram_interact(request):  # type: ignore[no-untyped-def]
 
 
 # ---------------------------------------------------------------------------
-# Gating config: per-(source, tool) MODE overrides ("free" | "gated" | "hidden"),
-# editable at runtime (by the gatekeeper tool) so a tool can be flipped WITHOUT a
-# restart. The tool servers read this live (cached) and combine it with their baseline
-# exempt list; the override wins. "hidden" = the server refuses the call outright and
-# filters the tool from tools/list. In-memory only: a restart re-seeds from each
-# server's baseline, which is the safe default (writes gated). Writers are the
-# gatekeeper's set_gating tool -- itself gated -- so flipping a gate requires a human
-# approval.
-_GATING: dict[str, dict[str, str]] = {}  # source -> {tool: mode}
-_GATING_MODES = {"free", "gated", "hidden"}
+# Tool catalog + modes: the sidecar is the SOLE authority on every tool's mode
+# ("always_allow" | "needs_approval" | "blocked"). Each approval-enabled server
+# registers its full tool catalog here (its middleware posts it at tools/list time),
+# and the operator's explicit per-(source, tool) choices are stored alongside it.
+# A tool with no stored mode is always_allow -- the deliberate ship-open default;
+# there is NO code-side allowlist anywhere else. "blocked" = the server refuses the
+# call outright and filters the tool from Claude's tools/list; the gatekeeper's
+# catalog view still shows it. State persists to APPROVAL_STATE_FILE (unset =
+# memory-only: choices are lost on restart -- fine for dev, set it in any real
+# deploy). Writers are the gatekeeper's set_gating tool and (later) the permissions
+# widget; PINNED entries are immutable at runtime -- changing one takes a code
+# change right here, by design.
+_PINNED = {("gatekeeper", "set_gating"): "needs_approval"}  # the gate-changer stays human-gated
+_MODES = {"always_allow", "needs_approval", "blocked"}
+_DEFAULT_MODE = "always_allow"
+_STATE: dict[str, dict] = {}  # source -> {"catalog": {tool: {...}}, "modes": {tool: mode}}
+
+
+def _state_file() -> str:
+    return os.getenv("APPROVAL_STATE_FILE", "")
+
+
+def _load_state() -> None:
+    path = _state_file()
+    if path and os.path.exists(path):
+        with open(path) as f:
+            data = json.load(f)
+        _STATE.clear()
+        _STATE.update(data)
+
+
+def _save_state() -> None:
+    path = _state_file()
+    if not path:
+        return
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(_STATE, f)
+    os.replace(tmp, path)  # atomic: a crash mid-write never corrupts the state
+
+
+def _source_state(source: str) -> dict:
+    return _STATE.setdefault(source, {"catalog": {}, "modes": {}})
+
+
+def _effective_modes(source: str) -> dict[str, str]:
+    """Stored choices with the code-pinned entries stamped on top (pins always win)."""
+    modes = dict((_STATE.get(source) or {}).get("modes") or {})
+    for (src, tool), mode in _PINNED.items():
+        if src == source:
+            modes[tool] = mode
+    return modes
+
+
+async def catalog(request):  # type: ignore[no-untyped-def]
+    if request.method == "POST":
+        body = await request.json()
+        source = body["source"]
+        _source_state(source)["catalog"] = {
+            t["name"]: {
+                "description": t.get("description", ""),
+                "read_only": bool(t.get("read_only")),
+            }
+            for t in body.get("tools") or []
+        }
+        _save_state()
+        n = len(_STATE[source]["catalog"])
+        log.info("catalog registered: %s (%d tools)", source, n)
+        return JSONResponse({"ok": True, "source": source, "count": n})
+    source = request.query_params.get("source", "")
+    modes = _effective_modes(source)
+    tools = {
+        name: {**info, "mode": modes.get(name, _DEFAULT_MODE)}
+        for name, info in ((_STATE.get(source) or {}).get("catalog") or {}).items()
+    }
+    return JSONResponse({"source": source, "tools": tools})
 
 
 async def gating(request):  # type: ignore[no-untyped-def]
     if request.method == "GET":
         source = request.query_params.get("source", "")
-        return JSONResponse({"source": source, "overrides": _GATING.get(source, {})})
+        return JSONResponse({"source": source, "modes": _effective_modes(source)})
     body = await request.json()
-    source, tool = body["source"], body["tool"]
-    mode = body.get("mode")
-    if mode is None and "requires_approval" in body:  # pre-tri-state gatekeeper client
-        mode = "gated" if body["requires_approval"] else "free"
-    if mode not in _GATING_MODES:
+    source, tool, mode = body["source"], body["tool"], body.get("mode")
+    if (source, tool) in _PINNED:
         return JSONResponse(
-            {"ok": False, "error": f"mode must be one of {sorted(_GATING_MODES)}"},
+            {"ok": False, "error": f"{tool} is pinned to {_PINNED[(source, tool)]} in code"},
+            status_code=403,
+        )
+    if mode not in _MODES:
+        return JSONResponse(
+            {"ok": False, "error": f"mode must be one of {sorted(_MODES)}"},
             status_code=400,
         )
-    _GATING.setdefault(source, {})[tool] = mode
-    log.info("gating override: %s/%s mode=%s", source, tool, mode)
-    return JSONResponse({"ok": True, "source": source, "overrides": _GATING[source]})
+    _source_state(source)["modes"][tool] = mode
+    _save_state()
+    log.info("mode set: %s/%s = %s", source, tool, mode)
+    return JSONResponse({"ok": True, "source": source, "modes": _effective_modes(source)})
 
 
 async def healthz(request):  # type: ignore[no-untyped-def]
@@ -666,6 +735,7 @@ app = Starlette(
         Route("/discord/interact", discord_interact, methods=["POST"]),
         Route("/telegram/interact", telegram_interact, methods=["POST"]),
         Route("/gating", gating, methods=["GET", "POST"]),
+        Route("/catalog", catalog, methods=["GET", "POST"]),
         Route("/healthz", healthz, methods=["GET"]),
     ]
 )
@@ -682,6 +752,9 @@ if __name__ == "__main__":
             f"(implemented: {sorted(_PROVIDERS_IMPLEMENTED)}; "
             f"planned: {sorted(_PROVIDERS_PLANNED)})"
         )
+    _load_state()
+    if not _state_file():
+        log.warning("APPROVAL_STATE_FILE unset -- tool modes are memory-only, lost on restart")
     uvicorn.run(
         app,
         host=os.getenv("APPROVAL_HOST", "127.0.0.1"),

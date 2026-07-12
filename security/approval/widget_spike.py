@@ -26,7 +26,7 @@ from pathlib import Path
 
 from fastmcp.server.middleware import Middleware
 
-from security.approval.gating import fetch_overrides, mode_for
+from security.approval.gating import fetch_modes, mode_for
 
 _WIDGETS = Path(__file__).resolve().parent / "widgets"
 _html_cache: str | None = None
@@ -65,15 +65,11 @@ def _extend_env_csv(name: str, *names: str) -> None:
     os.environ[name] = ",".join(sorted(have | set(names)))
 
 
-def _approval_exempt() -> set[str]:
-    return {p.strip() for p in os.getenv("MCP_APPROVAL_EXEMPT", "").split(",") if p.strip()}
-
-
 class WidgetMetaMiddleware(Middleware):
-    """Tag the GATED (non-exempt) tools in tools/list with the approval widget's _meta,
+    """Tag the needs_approval tools in tools/list with the approval widget's _meta,
     so the host renders the in-chat approval card when they're called. This is the ONE
-    place that decides which tools show the card -- driven by the same exempt list that
-    already decides which tools need approval. No per-tool code."""
+    place that decides which tools show the card -- driven by the same sidecar modes
+    that decide which tools need approval. No per-tool code."""
 
     def __init__(self, uri: str, source: str, approval_url: str) -> None:
         self._uri = uri
@@ -82,16 +78,17 @@ class WidgetMetaMiddleware(Middleware):
 
     async def on_list_tools(self, context, call_next):  # type: ignore[no-untyped-def]
         tools = await call_next(context)
-        # Same gated decision the ApprovalMiddleware uses (baseline exempt + live
-        # sidecar overrides), so the card and the gate always agree on a tool.
-        baseline = _approval_exempt()
-        overrides = await fetch_overrides(self._source, self._approval_url)
+        # Same mode decision the ApprovalMiddleware uses (live sidecar modes), so the
+        # card and the gate always agree on a tool.
+        modes = await fetch_modes(self._source, self._approval_url)
         meta = {"ui": {"resourceUri": self._uri}, "ui/resourceUri": self._uri}
         out = []
         for t in tools:
-            # Only "gated" gets the card; "hidden" tools were already filtered out by
-            # the (inner) ApprovalMiddleware's on_list_tools before this runs.
-            if mode_for(t.name, baseline, overrides) == "gated":
+            # Only needs_approval gets the card; blocked tools were already filtered
+            # out by the (inner) ApprovalMiddleware's on_list_tools before this runs.
+            # modes=None (sidecar never answered) tags nothing -- cosmetic only; the
+            # gate itself fails closed.
+            if modes is not None and mode_for(t.name, modes) == "needs_approval":
                 merged = {**(getattr(t, "meta", None) or {}), **meta}
                 # Best-effort tag; if the Tool isn't a copyable pydantic model, leave it.
                 with contextlib.suppress(Exception):
