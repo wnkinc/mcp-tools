@@ -77,7 +77,9 @@
   /* save bar */
   .savebar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--border)}
   .note{flex:1;font-size:12px;color:var(--ink-2)}
-  .note.err{color:var(--no)} .note.ok{color:var(--ok)}
+  .note.err{color:var(--no)}
+  /* saved note: only the glyph carries color, the words stay in the normal ink */
+  .note .nglyph{color:var(--ok)}
   .save{font:inherit;font-weight:500;padding:7px 16px;border-radius:8px;border:0;cursor:pointer;
     background:var(--accent);color:var(--accent-ink);transition:background .1s}
   .save:hover:enabled{background:var(--accent-hover)}
@@ -158,8 +160,15 @@ function parsePayload(text) {
 
 function setNote(msg, kind) {
   const n = $("note");
-  n.textContent = msg || "";
   n.className = "note" + (kind ? " " + kind : "");
+  n.replaceChildren();
+  if (kind === "ok") {
+    const g = document.createElement("span");
+    g.className = "nglyph";
+    g.textContent = "✓ ";
+    n.append(g);
+  }
+  n.append(msg || "");
 }
 
 function dirtyMap() {
