@@ -588,10 +588,11 @@ def test_middleware_blocked_tool_refuses_without_approval_path(monkeypatch):
 
 
 def _tool(name, read_only=False):
+    # read_only=None models a tool with NO annotations (grouped as "Other tools").
     return SimpleNamespace(
         name=name,
         description=f"{name} does things",
-        annotations=SimpleNamespace(readOnlyHint=read_only),
+        annotations=None if read_only is None else SimpleNamespace(readOnlyHint=read_only),
     )
 
 
@@ -614,7 +615,16 @@ def test_middleware_list_registers_the_full_catalog(monkeypatch):
     # too, with their read/write classification and effective mode.
     mw = _middleware_against_service(monkeypatch, gated=())
     _set_mode(TestClient(svc.app), "send_message", "blocked")
-    asyncio.run(_list_via(mw, [_tool("send_message"), _tool("get_me", read_only=True)]))
+    asyncio.run(
+        _list_via(
+            mw,
+            [
+                _tool("send_message"),
+                _tool("get_me", read_only=True),
+                _tool("probe", read_only=None),
+            ],
+        )
+    )
     tools = TestClient(svc.app).get("/catalog", params={"source": "teltool"}).json()["tools"]
     assert tools["send_message"] == {
         "description": "send_message does things",
@@ -622,6 +632,8 @@ def test_middleware_list_registers_the_full_catalog(monkeypatch):
         "mode": "blocked",
     }
     assert tools["get_me"]["read_only"] is True and tools["get_me"]["mode"] == "always_allow"
+    # No annotations -> tri-state None, which the widget groups as "Other tools".
+    assert tools["probe"]["read_only"] is None
 
 
 def test_middleware_list_survives_a_down_sidecar():

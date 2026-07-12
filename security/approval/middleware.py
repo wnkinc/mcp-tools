@@ -103,7 +103,12 @@ class ApprovalMiddleware(Middleware):
                 {
                     "name": t.name,
                     "description": t.description or "",
-                    "read_only": bool(getattr(t.annotations, "readOnlyHint", False)),
+                    # Tri-state, mirroring how Claude's own connector UI groups:
+                    # True -> read-only, False -> write/delete, None (tool has no
+                    # annotations) -> other.
+                    "read_only": (
+                        getattr(t.annotations, "readOnlyHint", None) if t.annotations else None
+                    ),
                 }
                 for t in tools
             ],
