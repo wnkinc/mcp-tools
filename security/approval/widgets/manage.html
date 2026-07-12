@@ -109,7 +109,7 @@
 <div class="card" id="card" hidden>
   <div class="lead">
     <div class="title">Tool permissions</div>
-    <div class="sub" id="sub">Server-enforced approval gates — set each tool to run freely, need your approval, or be blocked.</div>
+    <div class="sub" id="sub">Server-enforced approval gates.</div>
   </div>
   <div class="fullnote" id="fullnote" hidden></div>
   <div class="groups" id="groups"></div>
@@ -322,19 +322,20 @@ function buildGroup(src, label, tools) {
 
 function buildSource(src, info) {
   const wrap = document.createElement("div");
-  wrap.className = "srcsec";
+  wrap.className = "srcsec collapsed";  // connectors start collapsed: viewer drills in
   const shead = document.createElement("div");
   shead.className = "shead";
   const stoggle = document.createElement("button");
   stoggle.type = "button";
   stoggle.className = "stoggle";
-  stoggle.setAttribute("aria-expanded", "true");
+  stoggle.setAttribute("aria-expanded", "false");
   const count = Object.keys(info.tools).length;
   stoggle.innerHTML =
     `<span class="chev">${CHEV}</span><span class="sava">${src[0].toUpperCase()}</span>` +
     `<span class="sname">${titleCase(src)}</span><span class="count">${count}</span>`;
   shead.append(stoggle);
   const content = document.createElement("div");
+  content.hidden = true;
   // Same buckets as Claude's connector UI: readOnlyHint true / explicit false /
   // annotations absent.
   const names = Object.keys(info.tools).sort();
