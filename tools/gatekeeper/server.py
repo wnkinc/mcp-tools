@@ -3,13 +3,12 @@
 The approval sidecar is the sole authority on tool modes (see
 security/approval/gating.py): each approval-enabled server registers its full tool
 catalog there, every tool defaults to always_allow, and the operator's choices are
-stored per (source, tool). Three tools -- manage_tools (the in-chat permissions
-panel, see security/approval/manage_widget.py) plus:
+stored per (source, tool). Two tools:
 
-  - list_gating(source)          -- read-only: EVERY tool on that server with its
-        mode, grouped read-only vs write like Claude's connector UI. Blocked tools
-        are listed too -- nothing is invisible to the operator.
-  - set_gating(tool, mode, source) -- set a tool's mode:
+  - manage_tools()  -- the in-chat permissions panel (a widget, one section per
+        connector; see security/approval/manage_widget.py). The human review-and-save
+        surface; nothing changes until they click Save.
+  - set_gating(tool, mode, source) -- the conversational path: set one tool's mode:
         always_allow   -- runs with no approval card
         needs_approval -- each call needs a human approval
         blocked        -- disabled: calls refuse outright AND the tool is filtered
@@ -35,29 +34,6 @@ from security.serve import serve  # noqa: E402
 mcp = FastMCP(name="gatekeeper")
 
 APPROVAL_URL = os.getenv("APPROVAL_URL", "http://approval:8072").rstrip("/")
-
-
-@mcp.tool
-async def list_gating(source: str = "telegram") -> str:
-    """Every tool on `source` with its mode (always_allow / needs_approval / blocked),
-    grouped read-only vs write. Read-only; blocked tools are shown too."""
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(f"{APPROVAL_URL}/catalog", params={"source": source})
-    tools = resp.json().get("tools", {})
-    if not tools:
-        return (
-            f"No catalog registered for `{source}` yet. A server registers its catalog "
-            "on its first tools/list -- connect or refresh that connector once."
-        )
-    groups = {True: [], False: []}
-    for name, info in sorted(tools.items()):
-        groups[bool(info.get("read_only"))].append(f"  - {name}: {info.get('mode')}")
-    sections = []
-    if groups[False]:
-        sections.append("Write / interactive:\n" + "\n".join(groups[False]))
-    if groups[True]:
-        sections.append("Read-only:\n" + "\n".join(groups[True]))
-    return f"{source} tools ({len(tools)}):\n\n" + "\n\n".join(sections)
 
 
 @mcp.tool

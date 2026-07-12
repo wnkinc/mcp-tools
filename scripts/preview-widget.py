@@ -47,7 +47,6 @@ CATALOG = {
         "gatekeeper": {
             "pinned": ["set_gating"],
             "tools": {
-                "list_gating": {"description": "", "read_only": None, "mode": "always_allow"},
                 "manage_tools": {"description": "", "read_only": None, "mode": "always_allow"},
                 "set_gating": {"description": "", "read_only": None, "mode": "needs_approval"},
             },
