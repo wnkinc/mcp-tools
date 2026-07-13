@@ -194,7 +194,9 @@ services:
       MCP_AUTH_ENABLED: "0"
       HTTPS_PROXY: http://egress:3129
       HTTP_PROXY: http://egress:3129
-      NO_PROXY: localhost,127.0.0.1
+      # approval must bypass the egress wall (sideways traffic, not internet):
+      # the /healthz startup registration and mode fetches go straight to it.
+      NO_PROXY: approval,localhost,127.0.0.1
       # Where lean-export writes Lean-format files (the volume shared with lean).
       LEAN_DATA_ROOT: /lean-data
     volumes:
@@ -225,7 +227,9 @@ services:
       MCP_AUTH_ENABLED: "0"
       HTTPS_PROXY: http://egress:3130
       HTTP_PROXY: http://egress:3130
-      NO_PROXY: localhost,127.0.0.1
+      # approval must bypass the egress wall (sideways traffic, not internet):
+      # the /healthz startup registration and mode fetches go straight to it.
+      NO_PROXY: approval,localhost,127.0.0.1
       # The engine backtests ONLY pipeline data (the volume the data tool exports
       # into) -- never the image's bundled samples. server.py seeds the two engine
       # metadata files (market hours, symbol properties) there at startup.
