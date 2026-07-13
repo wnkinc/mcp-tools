@@ -16,7 +16,7 @@ security/                  # shared plumbing, imported by every tool
   guardrail/service/       #   output-screen sidecar; GUARDRAIL_PROVIDER=llamafirewall|bedrock
   eval/                    #   garak red-team harness
 tools/                     # one tool per dir: server.py + Dockerfile + requirements.lock
-  xmcp/                    #   X read-only search/lookup + Grok x_search (:8061)
+  xmcp/                    #   X API full surface (reads + OAuth1 user-context writes) (:8061)
   data/                    #   market data via OpenBB -> parquet lake (:8062)
   lean/                    #   QuantConnect Lean backtests of agent-authored algorithms (:8064)
   gatekeeper/              #   control plane over every tool's approval mode (:8065; docs/GATEKEEPER.md)
