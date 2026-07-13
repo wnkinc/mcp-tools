@@ -177,7 +177,10 @@ ami_id = aws.ssm.get_parameter(
 
 
 def _user_data(a: dict) -> str:
-    profiles = ",".join(tools + (["guardrail"] if guardrail_mode != "off" else []))
+    # Profiles are tools only: the guardrail service carries the untrusted tools'
+    # profile names in compose, so it starts with them automatically; "off" here
+    # means unscreened (GUARDRAIL_ENABLED=0), not un-deployed.
+    profiles = ",".join(tools)
     env = [
         f"COMPOSE_PROFILES={profiles}",
         f"MCP_DOMAIN={domain}",
@@ -195,7 +198,17 @@ def _user_data(a: dict) -> str:
         ]
     elif guardrail_mode == "llamafirewall":
         env.append("GUARDRAIL_PROVIDER=llamafirewall")
+    elif guardrail_mode == "off":
+        # Unscreened by GUARDRAIL_ENABLED=0 above; the bedrock provider selects the
+        # slim image build, and --scale below keeps the container from starting.
+        env.append("GUARDRAIL_PROVIDER=bedrock")
     env_body = "\n".join(env)
+
+    # "off" + an untrusted tool deployed: the guardrail service is profile-enabled
+    # (it rides the untrusted tools' profiles), so explicitly scale it to zero.
+    scale_off = ""
+    if guardrail_mode == "off" and ({"xmcp", "telegram"} & set(tools)):
+        scale_off = " --scale guardrail=0"
 
     # SSM reads go through python3-boto3: Ubuntu 24.04 dropped the `awscli` apt
     # package, and the v2 bundle would mean curl|unzip-ing an installer at boot.
@@ -236,7 +249,7 @@ ENVEOF
 {hf_fetch}
 # Per-tool secrets (tools/<tool>/.env) arrive later over SSM; required:false in
 # compose lets the stack come up while a tool waits for its secrets.
-docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build{scale_off}
 """
 
 

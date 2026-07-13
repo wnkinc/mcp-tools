@@ -38,12 +38,14 @@ The same image runs locally (`docker compose up`) and in the cloud — transport
   `internal` network, so each tool's credentials and egress stay isolated — a bug or bad
   dep in one stays contained to that tool.
 
-- **Tools are opt-in (compose profiles).** Every tool service carries a profile named
-  after itself; `COMPOSE_PROFILES` in the root `.env` picks which ones a deployment
-  builds and runs. The guardrail rides the same mechanism (profile `guardrail`, on by
-  default). The egress wall and approval sidecar carry no profile — they're the shared
-  substrate and always run. This is what keeps 3 tools or 100 tools the same repo: a
-  deployer never pulls the image of a tool they didn't ask for.
+- **Tools are opt-in (compose profiles); everything else is automatic.** Every tool
+  service carries a profile named after itself; `COMPOSE_PROFILES` in the root `.env`
+  picks which ones a deployment builds and runs — the only deploy-time choice. The
+  egress wall, approval sidecar, and gatekeeper carry no profile (shared substrate,
+  always run), and the guardrail lists the untrusted tools' profiles so it starts
+  exactly when a tool that needs it is deployed. This is what keeps 3 tools or 100
+  tools the same repo: a deployer never pulls the image of a tool they didn't ask
+  for, and never has to understand infrastructure to choose tools.
 
 - **The guardrail is a provider switch, matched to the deployment path.** The sidecar's
   `/scan` contract is fixed; `GUARDRAIL_PROVIDER` picks the engine behind it —

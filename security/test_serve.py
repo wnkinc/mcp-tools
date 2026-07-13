@@ -6,9 +6,14 @@ network. Auth wiring is covered in test_auth.py; here only its fail-closed
 behavior through serve() is asserted.
 """
 
+import asyncio
+from types import SimpleNamespace
+
+import httpx as _httpx
 import pytest
 from fastmcp import FastMCP
 
+import security.guardrail.middleware as _gmod
 from security.approval.middleware import ApprovalMiddleware
 from security.guardrail.middleware import GuardrailMiddleware
 from security.serve import _env_override, _strip_local_output_schemas, serve
@@ -186,3 +191,74 @@ def test_host_comes_from_env(monkeypatch):
 def test_strip_noops_when_fastmcp_internals_change():
     # Reaches a FastMCP internal; must degrade to a no-op, never crash the server.
     _strip_local_output_schemas(object())
+
+
+# --- guardrail middleware: fail-closed messages name the actual cause --------------
+
+
+def _screened_text(monkeypatch, fake_client) -> str:
+    """Run one tool result through GuardrailMiddleware with httpx stubbed."""
+    monkeypatch.setattr(_gmod.httpx, "AsyncClient", fake_client)
+    mw = GuardrailMiddleware(guardrail_url="http://guard.test", source="t")
+    ctx = SimpleNamespace(message=SimpleNamespace(name="fetch"))
+
+    async def _ran(_ctx):
+        return SimpleNamespace(content=[SimpleNamespace(text="external content")], is_error=False)
+
+    out = asyncio.run(mw.on_call_tool(ctx, _ran))
+    return out.content[0].text
+
+
+def _client_returning(status_code: int, payload: dict | None = None):
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            return _httpx.Response(
+                status_code, json=payload or {}, request=_httpx.Request("POST", url)
+            )
+
+    return _Client
+
+
+def _client_raising(exc: Exception):
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            raise exc
+
+    return _Client
+
+
+def test_guardrail_unreachable_names_the_container(monkeypatch):
+    # Container not deployed / crashed at startup: the withheld message says so and
+    # points at the startup-config suspects instead of a generic "unavailable".
+    text = _screened_text(monkeypatch, _client_raising(_httpx.ConnectError("refused")))
+    assert "failing closed" in text.lower() or "Failing CLOSED" in text
+    assert "unreachable" in text and "HF_TOKEN" in text and "BEDROCK_GUARDRAIL_ID" in text
+
+
+def test_guardrail_warming_up_says_retry(monkeypatch):
+    # 503 = service up, provider warming (first start downloads the model).
+    text = _screened_text(monkeypatch, _client_returning(503, {"detail": "provider warming up"}))
+    assert "starting up" in text and "retry" in text
+
+
+def test_guardrail_allow_still_wraps(monkeypatch):
+    text = _screened_text(monkeypatch, _client_returning(200, {"decision": "allow", "score": 0.0}))
+    assert "untrusted_content" in text and "external content" in text

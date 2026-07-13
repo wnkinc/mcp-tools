@@ -6,12 +6,15 @@
 #   cp env.example .env       # pick your tools: COMPOSE_PROFILES=xmcp,data,...
 #   docker compose up --build
 #
-# Every tool carries a compose profile named after itself; only the tools listed in
+# Every TOOL carries a compose profile named after itself; only the tools listed in
 # COMPOSE_PROFILES (root .env, or --profile flags) are built and started, so nobody
-# pulls a tool's image — lean's is 13GB — without opting in. The guardrail rides the
-# same mechanism (profile "guardrail", on by default in env.example; provider chosen
-# by GUARDRAIL_PROVIDER). The egress wall and approval sidecar carry no profile:
-# they are the shared substrate and always run.
+# pulls a tool's image — lean's is 13GB — without opting in. Profiles are the ONLY
+# deploy-time choice. Everything else is substrate and needs no decision: the egress
+# wall, the approval sidecar, and the gatekeeper always run ("using" the gatekeeper
+# is just attaching its connector), and the guardrail lists the untrusted tools'
+# profile names so it starts automatically exactly when a tool that needs it is
+# deployed. The one guardrail knob is the provider (GUARDRAIL_PROVIDER: llamafirewall
+# local-model default; deploy/aws uses bedrock).
 #
 # Security posture is chosen by env, not code (serve() reads it at startup): this base
 # file runs auth off (local dev) but the guardrail on. The docker-compose.tunnel.yml
@@ -33,11 +36,13 @@ services:
       - internal   # reachable by tools as http://egress:<port>
       - edge       # the only leg with internet -> performs the allowlisted CONNECTs
 
-  # Output screen for the untrusted tools (xmcp, telegram). Opt-in via the
-  # "guardrail" profile, like a tool; the provider behind /scan is env-chosen:
-  # llamafirewall (local model, default) or bedrock (AWS ApplyGuardrail). Turning
-  # it off = drop "guardrail" from COMPOSE_PROFILES + set GUARDRAIL_ENABLED=0
-  # (both in the root .env; the untrusted tools fail closed on a half-off state).
+  # Output screen for the untrusted tools (xmcp, telegram). NOT a deploy choice: it
+  # lists those tools' profiles, so compose starts it automatically whenever one of
+  # them is deployed (a data/lean-only stack skips it); a new untrusted tool adds its
+  # profile name here. The provider behind /scan is env-chosen: llamafirewall (local
+  # model, default) or bedrock (AWS ApplyGuardrail; what deploy/aws sets). Running an
+  # untrusted tool UNSCREENED (not recommended) is an explicit env choice --
+  # MCP_UNTRUSTED_OUTPUT=0 on that tool; the tools fail closed on a half-off state.
   guardrail:
     build:
       context: ./security/guardrail/service
@@ -46,7 +51,7 @@ services:
         # skips the local-model stack (torch/CUDA, multi-GB) entirely.
         GUARDRAIL_PROVIDER: ${GUARDRAIL_PROVIDER:-llamafirewall}
     image: mcp-guardrail
-    profiles: ["guardrail"]
+    profiles: ["xmcp", "telegram"]   # auto: starts with any untrusted-output tool
     restart: unless-stopped
     # No published port -- a true sidecar, reached over the network as http://guardrail:8071.
     environment:
@@ -271,12 +276,13 @@ services:
       egress:
         condition: service_started
 
+  # No profile: the gatekeeper is control-plane substrate (like the approval sidecar)
+  # and always runs. "Using" it is simply attaching its connector in claude.ai.
   gatekeeper:
     build:
       context: .
       dockerfile: tools/gatekeeper/Dockerfile
     image: mcp-gatekeeper
-    profiles: ["gatekeeper"]   # opt-in: runs only when listed in COMPOSE_PROFILES (root .env)
     restart: unless-stopped
     env_file:
       - path: tools/gatekeeper/.env
