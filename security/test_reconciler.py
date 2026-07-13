@@ -121,3 +121,51 @@ def test_torn_or_absent_request_is_ignored(repo):
     (rec.control_dir(repo) / "request.json").write_text('{"id": "half')
     rec.run_once(repo)  # no crash, no status
     assert _status(repo) is None or _status(repo) == {}
+
+
+def test_staging_writes_env_from_template_and_blanks_the_handoff(repo):
+    (repo / "tools" / "weather" / "env.example").write_text(
+        "# secrets\nW_KEY=\nMCP_AUTH_ENABLED=1\n"
+    )
+    rec.write_json(
+        rec.control_dir(repo) / "staging.json",
+        {"id": "s1", "tool": "weather", "values": {"W_KEY": "sk-abc$1\\n"}},
+    )
+    rec.run_once(repo)
+    env = repo / "tools" / "weather" / ".env"
+    text = env.read_text()
+    # Template preserved, key filled in place, regex-special chars land literally.
+    assert "W_KEY=sk-abc$1\\n" in text and "MCP_AUTH_ENABLED=1" in text
+    assert oct(env.stat().st_mode & 0o777) == "0o600"
+    # Handoff consumed: values no longer at rest in the control dir.
+    assert rec.read_json(rec.control_dir(repo) / "staging.json") == {}
+    # And inventory (same pass) already reflects readiness.
+    inv = rec.read_json(rec.control_dir(repo) / "inventory.json")["tools"]["weather"]
+    assert inv["secrets_ready"] is True
+
+
+def test_staging_merges_into_existing_env(repo):
+    (repo / "tools" / "weather" / ".env").write_text("OTHER=keep\nW_KEY=old\n")
+    rec.write_json(
+        rec.control_dir(repo) / "staging.json",
+        {"id": "s2", "tool": "weather", "values": {"W_KEY": "new"}},
+    )
+    rec.run_once(repo)
+    text = (repo / "tools" / "weather" / ".env").read_text()
+    assert "OTHER=keep" in text and "W_KEY=new" in text and "old" not in text
+
+
+def test_staging_refuses_unknown_tool_or_keys_and_discards(repo):
+    rec.write_json(
+        rec.control_dir(repo) / "staging.json",
+        {"id": "s3", "tool": "weather", "values": {"NOT_IN_MANIFEST": "x"}},
+    )
+    rec.run_once(repo)
+    assert rec.read_json(rec.control_dir(repo) / "staging.json") == {}  # discarded, not kept
+    assert not (repo / "tools" / "weather" / ".env").exists()
+    rec.write_json(
+        rec.control_dir(repo) / "staging.json",
+        {"id": "s4", "tool": "egress", "values": {"A": "b"}},
+    )
+    rec.run_once(repo)
+    assert rec.read_json(rec.control_dir(repo) / "staging.json") == {}

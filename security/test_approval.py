@@ -1085,3 +1085,70 @@ def test_deploy_status_shows_in_flight_operation():
         now=1_000_000.0,
     )
     assert "Deploy in flight: lean (applying)" in out
+
+
+# --- secrets staging sessions: the in-chat secrets form's capability API --------------
+
+
+def _mint_secrets(client, tool="xmcp", fields=None):
+    fields = fields or [{"key": "K1", "label": "Key one", "hint": "h1"}]
+    return client.post("/secrets", json={"tool": tool, "fields": fields}).json()["token"]
+
+
+def test_secrets_session_serves_fields_never_values(control):
+    _write_control(
+        control,
+        "inventory.json",
+        {"tools": {"xmcp": {"missing_secrets": ["K2"]}}, "updated": time.time()},
+    )
+    c = TestClient(svc.app)
+    token = _mint_secrets(
+        c,
+        fields=[
+            {"key": "K1", "label": "Key one", "hint": "h1"},
+            {"key": "K2", "label": "Key two", "hint": "h2"},
+        ],
+    )
+    r = c.get(f"/secrets/{token}")
+    assert r.headers["access-control-allow-origin"] == "*"  # widget iframe, token = credential
+    got = r.json()
+    assert got["tool"] == "xmcp"
+    assert [(f["key"], f["staged"]) for f in got["fields"]] == [("K1", True), ("K2", False)]
+    assert "values" not in json.dumps(got)
+
+
+def test_secrets_save_hands_off_and_is_one_shot(control):
+    (control / "staging.json").write_text("{}")
+    c = TestClient(svc.app)
+    token = _mint_secrets(c)
+    r = c.post(f"/secrets/{token}", json={"values": {"K1": "sk-live-123"}}).json()
+    assert r == {"ok": True, "staged": ["K1"]}
+    handoff = json.loads((control / "staging.json").read_text())
+    assert handoff == {"id": token, "tool": "xmcp", "values": {"K1": "sk-live-123"}}
+    # One-shot: the session is consumed; GET and re-POST both 404.
+    assert c.get(f"/secrets/{token}").status_code == 404
+    assert c.post(f"/secrets/{token}", json={"values": {"K1": "x"}}).status_code == 404
+
+
+def test_secrets_save_validates_keys_and_one_at_a_time(control):
+    (control / "staging.json").write_text("{}")
+    c = TestClient(svc.app)
+    token = _mint_secrets(c)
+    # Only session-declared keys are accepted; the session survives a 400.
+    bad = c.post(f"/secrets/{token}", json={"values": {"EVIL": "x"}})
+    assert bad.status_code == 400 and "EVIL" in bad.json()["error"]
+    assert c.post(f"/secrets/{token}", json={"values": {}}).status_code == 400
+    # An unconsumed handoff blocks a new save (one staging at a time).
+    (control / "staging.json").write_text(
+        json.dumps({"id": "other", "tool": "t", "values": {"A": "b"}})
+    )
+    assert c.post(f"/secrets/{token}", json={"values": {"K1": "v"}}).status_code == 409
+    # Missing staging file entirely = reconciler never initialized.
+    (control / "staging.json").unlink()
+    assert c.post(f"/secrets/{token}", json={"values": {"K1": "v"}}).status_code == 409
+
+
+def test_secrets_mint_validates(control):
+    c = TestClient(svc.app)
+    assert c.post("/secrets", json={"tool": "../evil", "fields": [{"key": "A"}]}).status_code == 400
+    assert c.post("/secrets", json={"tool": "xmcp", "fields": []}).status_code == 400

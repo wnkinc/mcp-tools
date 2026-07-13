@@ -18,6 +18,12 @@ Protocol (deploy/host/control/, each file has exactly ONE writer):
   inventory.json  written here each pass: {"tools": {name: {"deployed", "secrets_ready",
                   "missing_secrets"}}, "updated"} -- existence/emptiness checks only,
                   secret VALUES never leave the host.
+  staging.json    the ONE exception to single-writer, and the one non-world-readable
+                  file (uid 999, group <run-as>, mode 660): the sidecar writes a
+                  secrets handoff {"id", "tool", "values"} from the in-chat secrets
+                  widget, and this script consumes it -- validates the keys against
+                  the tool's manifest, writes tools/<tool>/.env (0600), then blanks
+                  the file to {} so values never rest here longer than one pass.
 
 Validation is hard and local: only tools shipping a tools/<name>/deploy.json
 manifest, only action "deploy", one request in flight at a time. The substrate
@@ -202,8 +208,43 @@ def process_request(repo: Path, req: dict, manifests: dict) -> dict:
     return {**status, "phase": "done", "detail": f"{tool} is up", "updated": time.time()}
 
 
+def apply_staging(repo: Path, manifests: dict) -> None:
+    """Consume a secrets handoff: manifest-validated keys -> tools/<tool>/.env (0600),
+    then blank the handoff. Values are never logged and never rest here past one pass."""
+    path = control_dir(repo) / "staging.json"
+    staging = read_json(path)
+    if not staging or not staging.get("id"):
+        return
+    tool, values = staging.get("tool", ""), staging.get("values") or {}
+    manifest = manifests.get(tool)
+    allowed = {s["key"] for s in (manifest or {}).get("secrets", [])}
+    if manifest is None or not values or not set(values) <= allowed:
+        log(f"staging {staging.get('id')} REFUSED (unknown tool or keys); discarded")
+        write_json(path, {})
+        return
+    env_path = repo / "tools" / tool / ".env"
+    if not env_path.exists():
+        template = repo / "tools" / tool / "env.example"
+        env_path.write_text(template.read_text() if template.exists() else "")
+        os.chmod(env_path, 0o600)
+    text = env_path.read_text()
+    for key, value in values.items():
+        pattern = re.compile(rf"^#?\s*{re.escape(key)}=.*$", re.MULTILINE)
+        if pattern.search(text):
+            # lambda (not a plain replacement string) so backslashes in the value
+            # land literally; default args bind the loop vars (B023).
+            text = pattern.sub(lambda _m, k=key, v=value: f"{k}={v}", text, count=1)
+        else:
+            text = text.rstrip("\n") + f"\n{key}={value}\n"
+    env_path.write_text(text)
+    os.chmod(env_path, 0o600)
+    write_json(path, {})  # consumed: values no longer at rest in the control dir
+    log(f"staged {len(values)} secret value(s) into tools/{tool}/.env")
+
+
 def run_once(repo: Path) -> None:
     manifests = load_manifests(repo)
+    apply_staging(repo, manifests)
     write_inventory(repo, manifests)
     req = read_json(control_dir(repo) / "request.json")
     if not req or not req.get("id"):
@@ -227,7 +268,9 @@ def init(repo: Path, run_as: str) -> None:
 
     cdir = control_dir(repo)
     cdir.mkdir(parents=True, exist_ok=True)
-    uid = pwd.getpwnam(run_as).pw_uid if not run_as.isdigit() else int(run_as)
+    pw = pwd.getpwnam(run_as) if not run_as.isdigit() else None
+    uid = pw.pw_uid if pw else int(run_as)
+    gid = pw.pw_gid if pw else int(run_as)
     for name, owner in (
         ("request.json", SIDECAR_UID),
         ("status.json", uid),
@@ -238,6 +281,13 @@ def init(repo: Path, run_as: str) -> None:
             path.write_text("{}")
         os.chown(path, owner, -1)
         os.chmod(path, 0o644)
+    # staging.json carries secret values in transit: sidecar-owned so it can write,
+    # run-as GROUP so the reconciler can read and blank it, and NOT world-readable.
+    staging = cdir / "staging.json"
+    if not staging.exists():
+        staging.write_text("{}")
+    os.chown(staging, SIDECAR_UID, gid)
+    os.chmod(staging, 0o660)
     os.chown(cdir, uid, -1)
     # S103: 755 is the point -- the sidecar container (uid 999) must traverse the
     # dir to reach its request.json; the files above carry the single-writer perms.

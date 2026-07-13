@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Preview the manage widget in a plain browser -- no claude.ai, no sidecar.
+"""Preview the gatekeeper widgets in a plain browser -- no claude.ai, no sidecar.
 
-Serves security/approval/widgets/manage.html at http://127.0.0.1:8123 with the
-claude.ai host bridge stubbed (theme + tool-result delivery) and the sidecar's
-/manage API replaced by an in-memory stub over a canned catalog -- so Save is
-sandboxed and nothing real changes. The page is RE-BAKED on every request:
-edit manage.html and just reload the browser. Append ?theme=dark for dark mode.
+Serves security/approval/widgets/*.html at http://127.0.0.1:8123 with the
+claude.ai host bridge stubbed (theme + tool-result delivery) and the sidecar
+APIs replaced by in-memory stubs over canned data -- so Save is sandboxed and
+nothing real changes. The page is RE-BAKED on every request: edit the HTML and
+just reload the browser.
+
+  /                the manage (permissions) widget      ?theme=dark for dark mode
+  /?w=secrets      the secrets-staging form
 
   python3 scripts/preview-widget.py [port]
 """
@@ -55,6 +58,26 @@ CATALOG = {
     },
 }
 
+# Canned secrets session for ?w=secrets (one staged field, one missing).
+SECRETS = {
+    "ok": True,
+    "tool": "xmcp",
+    "fields": [
+        {
+            "key": "X_OAUTH_CONSUMER_KEY",
+            "label": "X app API key",
+            "hint": "developer.x.com -> Keys and tokens",
+            "staged": True,
+        },
+        {
+            "key": "X_OAUTH_CONSUMER_SECRET",
+            "label": "X app API key secret",
+            "hint": "same card as the API key",
+            "staged": False,
+        },
+    ],
+}
+
 # The pieces claude.ai normally provides: the ExtApps bridge (theme + tool result)
 # and the network. The chat-surface background is painted here too, since the real
 # widget is transparent on purpose.
@@ -73,6 +96,13 @@ globalThis.ExtApps = {
 };
 const REAL_FETCH = window.fetch.bind(window);
 window.fetch = async (url, opts = {}) => {
+  if (String(url).includes("/secrets/")) {
+    if ((opts.method || "GET") === "POST") {
+      const vals = JSON.parse(opts.body).values;
+      return new Response(JSON.stringify({ ok: true, staged: Object.keys(vals).sort() }), { status: 200 });
+    }
+    return new Response(JSON.stringify(window.__SECRETS), { status: 200 });
+  }
   if (!String(url).includes("/manage/")) return REAL_FETCH(url, opts);
   if ((opts.method || "GET") === "POST") {
     const { changes, forget = [] } = JSON.parse(opts.body);
@@ -96,12 +126,14 @@ window.fetch = async (url, opts = {}) => {
 """
 
 
-def bake() -> bytes:
-    html = (WIDGETS / "manage.html").read_text()
-    marker = json.dumps({"token": "preview"})
+def bake(widget: str = "manage") -> bytes:
+    name, tag = ("secrets", "SECRETS") if widget == "secrets" else ("manage", "MANAGE")
+    html = (WIDGETS / f"{name}.html").read_text()
+    marker = json.dumps({"token": "preview", "tool": "xmcp"})
     boot = (
         f"{STUB}\nwindow.__CATALOG = {json.dumps(CATALOG)};\n"
-        f"window.__TOOLRESULT = {{ content: [{{ text: `<!--MANAGE {marker}-->` }}] }};"
+        f"window.__SECRETS = {json.dumps(SECRETS)};\n"
+        f"window.__TOOLRESULT = {{ content: [{{ text: `<!--{tag} {marker}-->` }}] }};"
     )
     return (
         html.replace("/*__EXT_APPS_BUNDLE__*/", boot)
@@ -112,7 +144,9 @@ def bake() -> bytes:
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - http.server API
-        body = bake() if self.path.split("?")[0] == "/" else b""
+        path, _, query = self.path.partition("?")
+        widget = "secrets" if "w=secrets" in query else "manage"
+        body = bake(widget) if path == "/" else b""
         self.send_response(200 if body else 404)
         self.send_header("content-type", "text/html; charset=utf-8")
         self.end_headers()

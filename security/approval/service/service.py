@@ -779,6 +779,99 @@ async def deploy_state(request):  # type: ignore[no-untyped-def]
     return JSONResponse(_deploy_state())
 
 
+# ---------------------------------------------------------------------------
+# Secrets staging sessions: the in-chat secrets widget's capability API.
+# Values flow BROWSER -> here -> staging.json -> the host reconciler writes the
+# tool's .env. They never enter chat content, tool results, or the model's
+# context, and NO endpoint ever returns a stored value -- GET serves field
+# definitions plus staged/missing booleans only. staging.json is created by
+# reconcile.py --init as uid-999-owned, group-readable, mode 660 (not world-
+# readable like the other control files); the reconciler consumes it by
+# blanking it to {} the moment the .env is written.
+_SECRET_SESSIONS: dict[str, dict] = {}  # token -> {"tool", "fields", "created"}
+
+
+def _prune_secret_sessions() -> None:
+    now = time.time()
+    for token in [t for t, r in _SECRET_SESSIONS.items() if now - r["created"] > _TTL_SECONDS]:
+        _SECRET_SESSIONS.pop(token, None)
+
+
+async def secrets_mint(request):  # type: ignore[no-untyped-def]
+    """Internal-only (the tunnel never routes the bare path): the gatekeeper's
+    stage_secrets tool starts a session carrying the manifest's field definitions."""
+    _prune_secret_sessions()
+    body = await request.json()
+    tool, fields = str(body.get("tool", "")), body.get("fields") or []
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", tool) or not fields:
+        return JSONResponse({"ok": False, "error": "invalid session"}, status_code=400)
+    token = secrets.token_urlsafe(24)
+    _SECRET_SESSIONS[token] = {"tool": tool, "fields": fields, "created": time.time()}
+    return JSONResponse({"ok": True, "token": token})
+
+
+async def secrets_session(request):  # type: ignore[no-untyped-def]
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_MANAGE_CORS)
+    _prune_secret_sessions()
+    rec = _SECRET_SESSIONS.get(request.path_params["token"])
+    if rec is None:
+        return JSONResponse(
+            {"ok": False, "error": "expired"}, status_code=404, headers=_MANAGE_CORS
+        )
+    tool = rec["tool"]
+    if request.method == "GET":
+        missing = set(
+            ((_deploy_state().get("inventory") or {}).get(tool) or {}).get(
+                "missing_secrets", [f["key"] for f in rec["fields"]]
+            )
+        )
+        return JSONResponse(
+            {
+                "ok": True,
+                "tool": tool,
+                "fields": [{**f, "staged": f["key"] not in missing} for f in rec["fields"]],
+            },
+            headers=_MANAGE_CORS,
+        )
+    # POST: the user's Save. Only keys this session declared are accepted, and a
+    # prior unconsumed handoff blocks a new one (one staging at a time, like deploys).
+    values = (await request.json()).get("values") or {}
+    allowed = {f["key"] for f in rec["fields"]}
+    values = {k: str(v) for k, v in values.items() if v}
+    if not values or not set(values) <= allowed:
+        bad = sorted(set(values) - allowed)
+        return JSONResponse(
+            {"ok": False, "error": f"unexpected keys {bad}" if bad else "no values"},
+            status_code=400,
+            headers=_MANAGE_CORS,
+        )
+    staging_path = os.path.join(_control_dir(), "staging.json")
+    try:
+        with open(staging_path) as f:
+            pending = json.load(f)
+    except (OSError, ValueError):
+        pending = None
+    if pending is None:
+        return JSONResponse(
+            {"ok": False, "error": "staging unavailable (reconciler not initialized)"},
+            status_code=409,
+            headers=_MANAGE_CORS,
+        )
+    if pending.get("id"):
+        return JSONResponse(
+            {"ok": False, "error": "another staging is being applied; retry shortly"},
+            status_code=409,
+            headers=_MANAGE_CORS,
+        )
+    token = request.path_params["token"]
+    with open(staging_path, "w") as f:
+        json.dump({"id": token, "tool": tool, "values": values}, f)
+    _SECRET_SESSIONS.pop(token, None)  # one-shot
+    log.info("secrets staged for %s: %d value(s) handed to the reconciler", tool, len(values))
+    return JSONResponse({"ok": True, "staged": sorted(values)}, headers=_MANAGE_CORS)
+
+
 async def deploy_request(request):  # type: ignore[no-untyped-def]
     body = await request.json()
     tool = str(body.get("tool", ""))
@@ -981,6 +1074,8 @@ app = Starlette(
         Route("/sources", sources, methods=["GET"]),
         Route("/deploy/state", deploy_state, methods=["GET"]),
         Route("/deploy/request", deploy_request, methods=["POST"]),
+        Route("/secrets", secrets_mint, methods=["POST"]),
+        Route("/secrets/{token}", secrets_session, methods=["GET", "POST", "OPTIONS"]),
         Route("/manage", manage_mint, methods=["POST"]),
         Route("/manage/{token}", manage_session, methods=["GET", "POST", "OPTIONS"]),
         Route("/healthz", healthz, methods=["GET"]),
