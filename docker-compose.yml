@@ -188,6 +188,9 @@ services:
     environment:
       MCP_HOST: 0.0.0.0
       MCP_TRANSPORT: http
+      # The approval sidecar: modes + the startup catalog registration that puts
+      # this tool in the manage panel (see serve()'s /healthz).
+      APPROVAL_URL: http://approval:8072
       MCP_AUTH_ENABLED: "0"
       HTTPS_PROXY: http://egress:3129
       HTTP_PROXY: http://egress:3129
@@ -216,6 +219,9 @@ services:
     environment:
       MCP_HOST: 0.0.0.0
       MCP_TRANSPORT: http
+      # The approval sidecar: modes + the startup catalog registration that puts
+      # this tool in the manage panel (see serve()'s /healthz).
+      APPROVAL_URL: http://approval:8072
       MCP_AUTH_ENABLED: "0"
       HTTPS_PROXY: http://egress:3130
       HTTP_PROXY: http://egress:3130
