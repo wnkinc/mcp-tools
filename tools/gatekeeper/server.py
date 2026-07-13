@@ -104,7 +104,7 @@ def format_deploy_status(
         lines.append(f"  - {src}: {st['tools']} tools, last used {_ago(st.get('seen'), now)}")
     stale = sorted(s for s in sources if s not in fresh and s != "gatekeeper")
     if stale:
-        lines.append("Stale (stored state, no live server -- forgettable in the manage panel):")
+        lines.append("Stale (stored state, no live server):")
         for src in stale:
             lines.append(f"  - {src}: last registered {_ago(sources[src].get('registered'), now)}")
     undeployed = sorted(p for p in manifests if p not in fresh)
@@ -171,10 +171,10 @@ def format_deploy_status(
 @mcp.tool
 async def deploy_status() -> str:
     """What this deployment serves and what else it could: deployed tools (with
-    last-used), stale leftovers, and undeployed tools from the codebase with the
-    secrets/notes enabling each would involve -- plus whether their secrets are
-    staged and how any in-flight deploy is progressing. Read-only; the free
-    companion to deploy_tool."""
+    last-used), stale leftovers, and available not-yet-deployed tools from the
+    codebase with the secrets/notes enabling each would involve -- plus whether
+    their secrets are staged and how any in-flight deploy is progressing.
+    Read-only; the free companion to deploy_tool."""
     async with httpx.AsyncClient(timeout=10) as client:
         src_resp = await client.get(f"{APPROVAL_URL}/sources")
         dep_resp = await client.get(f"{APPROVAL_URL}/deploy/state")
@@ -183,7 +183,8 @@ async def deploy_status() -> str:
 
 @mcp.tool
 async def deploy_tool(name: str) -> str:
-    """Deploy an undeployed tool from the codebase (one at a time). Requires the
+    """Deploy an available, not-yet-deployed tool from the codebase (one at a
+    time). Requires the
     user's approval, then the host reconciler applies it: profile added, image
     built, container up -- progress and results via deploy_status. Prerequisite:
     the tool's secrets staged on the host (deploy_status shows staged/missing).

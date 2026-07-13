@@ -34,7 +34,7 @@ def register_secrets_widget(mcp, load_manifests) -> None:  # type: ignore[no-unt
 
     @mcp.tool(meta={"ui": {"resourceUri": uri}, "ui/resourceUri": uri})
     async def stage_secrets(name: str) -> str:
-        """Open an in-chat form for staging an undeployed tool's secrets (API keys
+        """Open an in-chat form for staging a not-yet-deployed tool's secrets (API keys
         etc. from its deploy manifest). The USER types values into the form and
         saves; they go directly to the server, never through this chat -- neither
         you nor the chat transcript ever sees them. Already-staged keys show as

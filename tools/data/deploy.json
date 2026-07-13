@@ -12,7 +12,7 @@
     }
   ],
   "notes": [
-    "Ingested bars persist in the tool's state volume — they survive undeploys.",
+    "Ingested bars persist in the tool's state volume across restarts and rebuilds.",
     "Pairs with the lean tool: data-lake series become backtestable via lean-export."
   ],
   "depends": []

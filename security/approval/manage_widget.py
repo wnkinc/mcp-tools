@@ -35,11 +35,10 @@ def register_manage_widget(mcp) -> None:  # type: ignore[no-untyped-def]
     @mcp.tool(meta={"ui": {"resourceUri": uri}, "ui/resourceUri": uri})
     async def manage_tools() -> str:
         """Open the tool-permissions panel in the chat: one section per DEPLOYED
-        connector (telegram, xmcp, ...) with a "last used" label, every tool with
-        its mode (always_allow / needs_approval / blocked), and a per-connector
-        Forget that drops a stale connector's stored state. The USER reviews and
-        saves right in the panel; nothing changes until they click Save, and the
-        panel locks after one Save (its snapshot is stale then) -- call
+        connector (telegram, xmcp, ...) with a "last used" label, and every tool
+        with its mode (always_allow / needs_approval / blocked). The USER reviews
+        and saves right in the panel; nothing changes until they click Save, and
+        the panel locks after one Save (its snapshot is stale then) -- call
         manage_tools again for another round of changes. To change a mode
         conversationally instead, use set_gating."""
         try:
