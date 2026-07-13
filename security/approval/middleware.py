@@ -103,11 +103,12 @@ class ApprovalMiddleware(Middleware):
                 {
                     "name": t.name,
                     "description": t.description or "",
-                    # Tri-state, mirroring how Claude's own connector UI groups:
-                    # True -> read-only, False -> write/delete, None (tool has no
-                    # annotations) -> other.
-                    "read_only": (
-                        getattr(t.annotations, "readOnlyHint", None) if t.annotations else None
+                    # Claude's connector UI groups by readOnlyHint with the MCP spec
+                    # default applied: only an explicit true is read-only; false OR
+                    # absent means write/delete. Mirror that so the panel groups
+                    # exactly like Claude's own permissions screen.
+                    "read_only": bool(
+                        t.annotations and getattr(t.annotations, "readOnlyHint", False)
                     ),
                 }
                 for t in tools

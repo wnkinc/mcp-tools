@@ -17,7 +17,9 @@ from pathlib import Path
 
 WIDGETS = Path(__file__).resolve().parents[1] / "security" / "approval" / "widgets"
 
-# Representative data: several connectors, every group, plus a pinned tool.
+# Representative data: several connectors, both groups, plus a pinned tool.
+# read_only is a plain bool on the wire: the sidecar applies the MCP spec default
+# (absent readOnlyHint = not read-only), so the widget never sees a null.
 CATALOG = {
     "ok": True,
     "sources": {
@@ -32,7 +34,7 @@ CATALOG = {
                 "delete_message": {"description": "", "read_only": False, "mode": "blocked"},
                 "create_group": {"description": "", "read_only": False, "mode": "always_allow"},
                 "edit_message": {"description": "", "read_only": False, "mode": "always_allow"},
-                "approval_probe": {"description": "", "read_only": None, "mode": "always_allow"},
+                "approval_probe": {"description": "", "read_only": False, "mode": "always_allow"},
             },
         },
         "xmcp": {
@@ -47,8 +49,8 @@ CATALOG = {
         "gatekeeper": {
             "pinned": ["set_gating"],
             "tools": {
-                "manage_tools": {"description": "", "read_only": None, "mode": "always_allow"},
-                "set_gating": {"description": "", "read_only": None, "mode": "needs_approval"},
+                "manage_tools": {"description": "", "read_only": False, "mode": "always_allow"},
+                "set_gating": {"description": "", "read_only": False, "mode": "needs_approval"},
             },
         },
     },

@@ -23,8 +23,10 @@ gatekeeper tool ──► approval sidecar (sole authority on modes) ◄── e
   with no stored choice is `always_allow` — deliberately ship-open, so a fresh install
   has a working connector; you curate from there.
 - **Each server registers its catalog** with the sidecar on its first `tools/list`
-  (name, description, and read-only/write/other classification from the tool's MCP
-  annotations). Until a connector has listed once, it won't appear in the panel.
+  (name, description, and a read-only flag from the tool's MCP annotations, with the
+  spec default applied: only an explicit `readOnlyHint: true` is read-only — the same
+  rule Claude's own connector UI groups by). Until a connector has listed once, it
+  won't appear in the panel.
 - **Enforcement is immediate (~15s cache); invisibility lags.** A blocked or gated
   tool is enforced within seconds, but Claude keeps showing a blocked tool in its list
   until the connector's cached `tools/list` refreshes.
@@ -32,8 +34,8 @@ gatekeeper tool ──► approval sidecar (sole authority on modes) ◄── e
 ## The two surfaces
 
 - **`manage_tools`** opens the **permissions panel** in chat: one collapsible section
-  per connector (telegram, xmcp, …), tools grouped read-only / write-delete / other,
-  each with an always-allow / needs-approval / blocked control. Review, then **Save** —
+  per connector (telegram, xmcp, …), tools grouped read-only / write-delete, each with
+  an always-allow / needs-approval / blocked control. Review, then **Save** —
   one save can span connectors. The human's click is the authorization, so a save takes
   no approval card. (See `security/approval/manage_widget.py` and
   `security/approval/widgets/manage.html`.)

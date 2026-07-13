@@ -588,7 +588,8 @@ def test_middleware_blocked_tool_refuses_without_approval_path(monkeypatch):
 
 
 def _tool(name, read_only=False):
-    # read_only=None models a tool with NO annotations (grouped as "Other tools").
+    # read_only=None models a tool with NO annotations (the MCP spec default applies:
+    # not read-only, same as Claude's own grouping).
     return SimpleNamespace(
         name=name,
         description=f"{name} does things",
@@ -632,8 +633,9 @@ def test_middleware_list_registers_the_full_catalog(monkeypatch):
         "mode": "blocked",
     }
     assert tools["get_me"]["read_only"] is True and tools["get_me"]["mode"] == "always_allow"
-    # No annotations -> tri-state None, which the widget groups as "Other tools".
-    assert tools["probe"]["read_only"] is None
+    # No annotations -> the spec default: NOT read-only, exactly as Claude's UI
+    # groups an annotation-less tool under Interactive.
+    assert tools["probe"]["read_only"] is False
 
 
 def test_middleware_list_survives_a_down_sidecar():

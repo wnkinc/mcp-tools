@@ -336,13 +336,12 @@ function buildSource(src, info) {
   shead.append(stoggle);
   const content = document.createElement("div");
   content.hidden = true;
-  // Same buckets as Claude's connector UI: readOnlyHint true / explicit false /
-  // annotations absent.
+  // Same buckets as Claude's connector UI, which applies the MCP spec default:
+  // readOnlyHint true -> read-only; false OR absent -> write/delete.
   const names = Object.keys(info.tools).sort();
-  const byGroup = { "Read-only tools": [], "Write/delete tools": [], "Other tools": [] };
+  const byGroup = { "Read-only tools": [], "Write/delete tools": [] };
   for (const tool of names) {
-    const ro = info.tools[tool].read_only;
-    byGroup[ro === true ? "Read-only tools" : ro === false ? "Write/delete tools" : "Other tools"].push(tool);
+    byGroup[info.tools[tool].read_only === true ? "Read-only tools" : "Write/delete tools"].push(tool);
   }
   for (const [label, list] of Object.entries(byGroup)) {
     if (list.length) content.append(buildGroup(src, label, list));

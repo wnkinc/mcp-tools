@@ -673,11 +673,12 @@ async def catalog(request):  # type: ignore[no-untyped-def]
         body = await request.json()
         source = body["source"]
         _source_state(source)["catalog"] = {
-            # read_only is TRI-STATE (True/False/None) -- None means the tool has no
-            # annotations, which the widget groups as "Other tools" like Claude's UI.
+            # read_only follows the MCP spec default Claude's UI applies: only an
+            # explicit readOnlyHint=true is read-only; false, absent, or a legacy
+            # null all mean write/delete.
             t["name"]: {
                 "description": t.get("description", ""),
-                "read_only": t.get("read_only"),
+                "read_only": t.get("read_only") is True,
             }
             for t in body.get("tools") or []
         }
