@@ -45,10 +45,9 @@
     border-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
   .sname{font-weight:600;font-size:13.5px}
   .lastseen{flex:none;font-size:11px;color:var(--muted);margin-left:2px}
-  /* deployment status chip: live (from the startup beacon) vs stale stored state */
+  /* stale chip: no live server registers this connector (live sections are unmarked) */
   .dstat{flex:none;font-size:10.5px;color:var(--muted);border:1px solid var(--border);
     border-radius:999px;padding:1px 8px}
-  .dstat.live{color:var(--ok);border-color:transparent;background:var(--tint)}
   /* forget: a quiet per-connector text button; marked sections gray out until Save */
   .fbtn{flex:none;font:inherit;font-size:11.5px;color:var(--muted);background:none;
     border:0;padding:2px 6px;border-radius:6px;cursor:pointer}
@@ -103,9 +102,12 @@
   .note.err{color:var(--no)}
   /* saved note: only the glyph carries color, the words stay in the normal ink */
   .note .nglyph{color:var(--ok)}
-  .save{font:inherit;font-weight:500;padding:7px 16px;border-radius:8px;border:0;cursor:pointer;
-    background:var(--accent);color:var(--accent-ink);transition:background .1s}
-  .save:hover:enabled{background:var(--accent-hover)}
+  /* same convention as the approval card's buttons: transparent, hairline outline,
+     matched ink -- no accent fill, no visual rank */
+  .save{font:inherit;font-weight:400;padding:7px 16px;border-radius:8px;cursor:pointer;
+    background:transparent;border:1px solid var(--border);color:var(--ink);transition:background .1s}
+  .save:hover:enabled{background:var(--tint)}
+  .save:active:enabled{opacity:.8}
   .save:disabled{opacity:.45;cursor:default}
   .fullnote{padding:14px 16px;font-size:12.5px;color:var(--ink-2)}
   details{border-top:1px solid var(--border)}
@@ -366,12 +368,11 @@ function buildSource(src, info) {
   // Deployed vs stale, from the ~30s startup beacon. Forget only exists on STALE
   // sources: forgetting a live one would be a self-defeating 30s blip that only
   // wipes its curation (the server re-registers on its next health probe).
+  // Live sections carry no chip -- this panel shows the deployment, so
+  // "deployed" is the unmarked default; only STALE state is worth ink.
   const live = info.registered && Date.now() / 1000 - info.registered < 90;
   if (live) {
-    const chip = document.createElement("span");
-    chip.className = "dstat live";
-    chip.textContent = "deployed";
-    shead.append(stoggle, chip);
+    shead.append(stoggle);
   } else {
     const chip = document.createElement("span");
     chip.className = "dstat";
