@@ -713,6 +713,23 @@ async def catalog(request):  # type: ignore[no-untyped-def]
     return JSONResponse({"source": source, "tools": tools})
 
 
+async def sources(request):  # type: ignore[no-untyped-def]
+    """Internal: every known source with its liveness timestamps. `registered` is
+    stamped by each server's ~30s startup beacon, so recency == currently deployed;
+    `seen` is the last real client tools/list. The gatekeeper's deploy_status and
+    the manage panel's deployed/stale labels read this shape."""
+    return JSONResponse(
+        {
+            src: {
+                "tools": len(st.get("catalog") or {}),
+                "registered": st.get("registered"),
+                "seen": st.get("seen"),
+            }
+            for src, st in _STATE.items()
+        }
+    )
+
+
 async def gating(request):  # type: ignore[no-untyped-def]
     if request.method == "GET":
         source = request.query_params.get("source", "")
@@ -849,6 +866,10 @@ async def manage_session(request):  # type: ignore[no-untyped-def]
             # Epoch seconds of the last CLIENT tools/list (null = never): the panel's
             # "last used" label. Startup re-registration deliberately doesn't count.
             "last_seen": st.get("seen"),
+            # Epoch seconds of the last startup beacon (~30s cadence while deployed):
+            # recent = deployed (Forget would be a self-defeating 30s blip, so the
+            # panel hides it); old/absent = stale, safe to forget.
+            "registered": st.get("registered"),
         }
     return JSONResponse({"ok": True, "sources": sources}, headers=_MANAGE_CORS)
 
@@ -875,6 +896,7 @@ app = Starlette(
         Route("/telegram/interact", telegram_interact, methods=["POST"]),
         Route("/gating", gating, methods=["GET", "POST"]),
         Route("/catalog", catalog, methods=["GET", "POST"]),
+        Route("/sources", sources, methods=["GET"]),
         Route("/manage", manage_mint, methods=["POST"]),
         Route("/manage/{token}", manage_session, methods=["GET", "POST", "OPTIONS"]),
         Route("/healthz", healthz, methods=["GET"]),

@@ -913,3 +913,59 @@ def test_manage_forget_wins_over_mode_edits_to_the_same_source():
         json={"changes": {"srcx": {"a": "blocked"}}, "forget": ["srcx"]},
     ).json()
     assert r["forgotten"] == ["srcx"] and "srcx" not in svc._STATE
+
+
+def test_sources_endpoint_reports_liveness_shape():
+    # Internal inventory for deploy_status + the panel's deployed/stale labels:
+    # registered = the ~30s startup beacon (deployed-ness), seen = client use.
+    c = TestClient(svc.app)
+    c.post("/catalog", json={"source": "livetool", "origin": "startup", "tools": [{"name": "a"}]})
+    c.post("/catalog", json={"source": "usedtool", "origin": "list", "tools": [{"name": "b"}]})
+    got = c.get("/sources").json()
+    assert got["livetool"]["tools"] == 1
+    assert got["livetool"]["registered"] and got["livetool"]["seen"] is None
+    assert got["usedtool"]["registered"] and got["usedtool"]["seen"]
+
+
+def test_manage_session_carries_registered():
+    c = TestClient(svc.app)
+    c.post("/catalog", json={"source": "livetool", "origin": "startup", "tools": [{"name": "a"}]})
+    src = TestClient(svc.app).get(f"/manage/{_mint(c)}").json()["sources"]["livetool"]
+    assert isinstance(src["registered"], float)
+
+
+# --- the gatekeeper deploy_status helpers (manifest inventory) -------------------------
+
+_GK_SPEC = importlib.util.spec_from_file_location(
+    "gatekeeper_server", Path(__file__).parents[1] / "tools" / "gatekeeper" / "server.py"
+)
+_gk = importlib.util.module_from_spec(_GK_SPEC)
+_GK_SPEC.loader.exec_module(_gk)
+
+
+def test_deploy_status_splits_deployed_stale_and_available():
+    manifests = _gk.load_manifests()  # the real shipped manifests
+    now = 1_000_000.0
+    sources = {
+        "telegram": {"tools": 116, "registered": now - 20, "seen": now - 7200},
+        "xmcp": {"tools": 134, "registered": now - 40 * 86400, "seen": None},
+        "gatekeeper": {"tools": 2, "registered": now - 20, "seen": None},
+    }
+    out = _gk.format_deploy_status(manifests, sources, now=now)
+    # telegram: live beacon -> deployed with last-used; xmcp: old beacon -> stale.
+    assert "telegram: 116 tools, last used 2h ago" in out
+    assert "xmcp: last registered 40d ago" in out
+    # data/lean ship manifests but aren't running -> available, with their needs.
+    assert "data:" in out and "Tiingo API key" in out
+    assert "lean:" in out and "13GB" in out
+    # the gatekeeper never lists itself; manual steps close the message.
+    assert "gatekeeper: 2" not in out
+    assert "COMPOSE_PROFILES" in out
+
+
+def test_deploy_status_all_deployed_needs_no_available_section():
+    manifests = _gk.load_manifests()
+    now = 1_000_000.0
+    sources = {p: {"tools": 5, "registered": now - 10, "seen": None} for p in manifests}
+    out = _gk.format_deploy_status(manifests, sources, now=now)
+    assert "Available to deploy" not in out and "Stale" not in out

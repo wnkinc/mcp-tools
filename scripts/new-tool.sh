@@ -86,6 +86,23 @@ ENV
 sed -e "s|__NAME__|${NAME}|g" -e "s|__PORT__|${PORT}|g" \
     "$ROOT/scripts/templates/Dockerfile.template" > "$DIR/Dockerfile"
 
+# Deploy manifest: what the gatekeeper's deploy_status (and the chat-driven deploy
+# flow) reads to describe this tool -- fill in summary, secrets, and notes.
+cat > "$DIR/deploy.json" <<JSON
+{
+  "title": "${NAME}",
+  "profile": "${NAME}",
+  "subdomain": "${NAME}",
+  "port": ${PORT},
+  "summary": "TODO: one sentence on what this tool does.",
+  "secrets": [
+    {"key": "TODO_API_KEY", "label": "TODO human name", "hint": "TODO where to get it"}
+  ],
+  "notes": [],
+  "depends": []
+}
+JSON
+
 # Per-tool egress allowlist stub (locked down by default -- add only what it needs).
 ALLOW="$ROOT/security/egress-proxy/allowlist/${NAME}.txt"
 cat > "$ALLOW" <<TXT

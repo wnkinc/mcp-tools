@@ -29,6 +29,7 @@ CATALOG = {
         "telegram": {
             "pinned": ["send_message"],
             "last_seen": time.time() - 7200,  # "last used 2h ago"
+            "registered": time.time() - 20,  # fresh beacon -> "deployed", no Forget
             "tools": {
                 "get_me": {"description": "", "read_only": True, "mode": "always_allow"},
                 "get_chats": {"description": "", "read_only": True, "mode": "always_allow"},
@@ -43,6 +44,7 @@ CATALOG = {
         "xmcp": {
             "pinned": [],
             "last_seen": None,  # "never used"
+            "registered": time.time() - 86400 * 3,  # stale -> Forget appears
             "tools": {
                 "searchPostsRecent": {"description": "", "read_only": True, "mode": "always_allow"},
                 "getUserByUsername": {"description": "", "read_only": True, "mode": "always_allow"},

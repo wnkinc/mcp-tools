@@ -3,7 +3,11 @@
 The approval sidecar is the sole authority on tool modes (see
 security/approval/gating.py): each approval-enabled server registers its full tool
 catalog there, every tool defaults to always_allow, and the operator's choices are
-stored per (source, tool). Two tools:
+stored per (source, tool). Three tools:
+
+  - deploy_status() -- read-only deployment inventory: what's running (live startup
+        beacons), what's stale, and what else the codebase ships (tools/*/deploy.json
+        manifests) with the secrets/notes enabling each would involve.
 
   - manage_tools()  -- the in-chat permissions panel (a widget, one section per
         connector; see security/approval/manage_widget.py). The human review-and-save
@@ -21,8 +25,10 @@ always takes a human approval), and manage_tools is inherently human-in-the-loop
 (nothing changes until the user clicks Save).
 """
 
+import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -36,6 +42,88 @@ from security.serve import serve  # noqa: E402
 mcp = FastMCP(name="gatekeeper")
 
 APPROVAL_URL = os.getenv("APPROVAL_URL", "http://approval:8072").rstrip("/")
+
+# A source whose startup beacon (~30s cadence) arrived within this window is
+# currently deployed; older/absent means its container is gone (stale state).
+DEPLOYED_WINDOW_SECONDS = 90
+
+# tools/*/deploy.json -- each tool's deploy manifest (what it is, which secrets it
+# needs and where to get them, notes like image size). The gatekeeper image bakes
+# the whole tools/ tree, so a rebuild picks up new tools automatically.
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+
+
+def load_manifests(tools_dir: Path = TOOLS_DIR) -> dict[str, dict]:
+    """Every shipped tool's deploy manifest, keyed by profile name."""
+    manifests = {}
+    for path in sorted(tools_dir.glob("*/deploy.json")):
+        m = json.loads(path.read_text())
+        manifests[m["profile"]] = m
+    return manifests
+
+
+def _ago(epoch: float | None, now: float) -> str:
+    if not epoch:
+        return "never"
+    s = max(0.0, now - epoch)
+    if s < 5400:
+        return f"{round(s / 60)}m ago"
+    if s < 129600:
+        return f"{round(s / 3600)}h ago"
+    return f"{round(s / 86400)}d ago"
+
+
+def format_deploy_status(manifests: dict, sources: dict, now: float | None = None) -> str:
+    """The agent-facing inventory: deployed tools (from live beacons), undeployed
+    ones (manifest present, no fresh beacon) with what enabling each would take."""
+    now = now or time.time()
+    fresh = {
+        s
+        for s, st in sources.items()
+        if st.get("registered") and now - st["registered"] < DEPLOYED_WINDOW_SECONDS
+    }
+    lines = ["Deployed (live startup beacon):"]
+    for src in sorted(fresh):
+        if src == "gatekeeper":
+            continue
+        st = sources[src]
+        lines.append(f"  - {src}: {st['tools']} tools, last used {_ago(st.get('seen'), now)}")
+    stale = sorted(s for s in sources if s not in fresh and s != "gatekeeper")
+    if stale:
+        lines.append("Stale (stored state, no live server -- forgettable in the manage panel):")
+        for src in stale:
+            lines.append(f"  - {src}: last registered {_ago(sources[src].get('registered'), now)}")
+    undeployed = sorted(p for p in manifests if p not in fresh)
+    if undeployed:
+        lines.append("Available to deploy (in the codebase, not running):")
+        for profile in undeployed:
+            m = manifests[profile]
+            lines.append(f"  - {profile}: {m['summary']}")
+            if m.get("secrets"):
+                needs = "; ".join(f"{s['label']} ({s['hint']})" for s in m["secrets"])
+                lines.append(f"      secrets needed: {needs}")
+            else:
+                lines.append("      secrets needed: none beyond the shared Google OAuth identity")
+            for note in m.get("notes", []):
+                lines.append(f"      note: {note}")
+        lines.append(
+            "To deploy one today (chat-driven deploy arrives in a later phase), on the host: "
+            "fill tools/<name>/.env from its env.example, add https://<subdomain>.<your-domain>"
+            "/auth/callback to the shared Google OAuth client, add the profile to "
+            "COMPOSE_PROFILES in the root .env, run docker compose (both -f files) up -d "
+            "--build <name>, then add the connector in claude.ai."
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool
+async def deploy_status() -> str:
+    """What this deployment serves and what else it could: deployed tools (with
+    last-used), stale leftovers, and undeployed tools from the codebase with the
+    secrets/notes enabling each would involve. Read-only."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"{APPROVAL_URL}/sources")
+    return format_deploy_status(load_manifests(), resp.json())
 
 
 @mcp.tool

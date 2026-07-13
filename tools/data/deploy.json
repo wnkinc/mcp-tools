@@ -1,0 +1,19 @@
+{
+  "title": "Market data",
+  "profile": "data",
+  "subdomain": "data",
+  "port": 8062,
+  "summary": "Crypto market data via OpenBB/Tiingo into a local parquet lake, exportable to the Lean backtester.",
+  "secrets": [
+    {
+      "key": "TIINGO_API_KEY",
+      "label": "Tiingo API key",
+      "hint": "tiingo.com → account → API token (free tier works)"
+    }
+  ],
+  "notes": [
+    "Ingested bars persist in the tool's state volume — they survive undeploys.",
+    "Pairs with the lean tool: data-lake series become backtestable via lean-export."
+  ],
+  "depends": []
+}

@@ -181,6 +181,33 @@ Settings → Connectors → Add custom connector → `https://<tool>.example.com
 
 ---
 
+## Adding or removing a tool later
+
+Your initial tool choice isn't privileged — `COMPOSE_PROFILES` is just a line in the
+root `.env`, and all the shared infrastructure (tunnel routes for every shipped tool,
+the OAuth client, egress listeners) already exists. Adding a tool you skipped:
+
+1. `cp tools/<name>/env.example tools/<name>/.env` and fill its secrets — each tool's
+   `tools/<name>/deploy.json` manifest says exactly which and where to get them (or
+   ask the gatekeeper's `deploy_status` in chat).
+2. Add `https://<name>.example.com/auth/callback` to the shared Google OAuth client's
+   authorized redirect URIs (skip if you pre-added all tools' callbacks in step 4).
+3. Add `<name>` to `COMPOSE_PROFILES` in the root `.env`, then
+   `docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build <name>`.
+4. Add the connector in Claude (step 9). No tunnel or DNS changes — the route
+   already exists and stops 502ing the moment the container is healthy.
+
+The tool appears in the gatekeeper's manage panel within ~30 s of starting (its
+health probe registers it), pre-gateable before Claude ever connects.
+
+Removing one is the mirror: delete it from `COMPOSE_PROFILES`,
+`up -d --remove-orphans` (both `-f` files!), remove the connector in Claude, and
+Forget its now-stale section in the manage panel. Its image, secrets, and state
+volume stay on disk, so re-adding later is instant — though forgotten permission
+modes start back at `always_allow`.
+
+---
+
 ## Troubleshooting
 
 - **"Connection issue / server configuration issue" with repeated

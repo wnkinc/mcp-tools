@@ -45,6 +45,10 @@
     border-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
   .sname{font-weight:600;font-size:13.5px}
   .lastseen{flex:none;font-size:11px;color:var(--muted);margin-left:2px}
+  /* deployment status chip: live (from the startup beacon) vs stale stored state */
+  .dstat{flex:none;font-size:10.5px;color:var(--muted);border:1px solid var(--border);
+    border-radius:999px;padding:1px 8px}
+  .dstat.live{color:var(--ok);border-color:transparent;background:var(--tint)}
   /* forget: a quiet per-connector text button; marked sections gray out until Save */
   .fbtn{flex:none;font:inherit;font-size:11.5px;color:var(--muted);background:none;
     border:0;padding:2px 6px;border-radius:6px;cursor:pointer}
@@ -359,23 +363,35 @@ function buildSource(src, info) {
     `<span class="chev">${CHEV}</span><span class="sava">${src[0].toUpperCase()}</span>` +
     `<span class="sname">${titleCase(src)}</span><span class="count">${count}</span>` +
     `<span class="lastseen">${fmtLastSeen(info.last_seen)}</span>`;
-  // Forget: drop this connector's stored state (catalog, modes, last-seen) on Save.
-  // A still-deployed server re-registers on its next health probe; one removed from
-  // the deployment (or detached in Claude) stays gone.
-  const fbtn = document.createElement("button");
-  fbtn.type = "button";
-  fbtn.className = "fbtn";
-  fbtn.textContent = "Forget";
-  fbtn.title = "Remove this connector's stored permissions and history on Save.";
-  fbtn.addEventListener("click", () => {
-    if (done) return;
-    if (forgets.has(src)) forgets.delete(src); else forgets.add(src);
-    const marked = forgets.has(src);
-    fbtn.textContent = marked ? "Undo" : "Forget";
-    wrap.classList.toggle("forgotten", marked);
-    refreshChrome();
-  });
-  shead.append(stoggle, fbtn);
+  // Deployed vs stale, from the ~30s startup beacon. Forget only exists on STALE
+  // sources: forgetting a live one would be a self-defeating 30s blip that only
+  // wipes its curation (the server re-registers on its next health probe).
+  const live = info.registered && Date.now() / 1000 - info.registered < 90;
+  if (live) {
+    const chip = document.createElement("span");
+    chip.className = "dstat live";
+    chip.textContent = "deployed";
+    shead.append(stoggle, chip);
+  } else {
+    const chip = document.createElement("span");
+    chip.className = "dstat";
+    chip.textContent = "stale";
+    chip.title = "No live server is registering this connector — its stored state can be forgotten.";
+    const fbtn = document.createElement("button");
+    fbtn.type = "button";
+    fbtn.className = "fbtn";
+    fbtn.textContent = "Forget";
+    fbtn.title = "Remove this connector's stored permissions and history on Save.";
+    fbtn.addEventListener("click", () => {
+      if (done) return;
+      if (forgets.has(src)) forgets.delete(src); else forgets.add(src);
+      const marked = forgets.has(src);
+      fbtn.textContent = marked ? "Undo" : "Forget";
+      wrap.classList.toggle("forgotten", marked);
+      refreshChrome();
+    });
+    shead.append(stoggle, chip, fbtn);
+  }
   const content = document.createElement("div");
   content.hidden = true;
   // Same buckets as Claude's connector UI, which applies the MCP spec default:

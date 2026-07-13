@@ -1,0 +1,35 @@
+{
+  "title": "X (Twitter) API",
+  "profile": "xmcp",
+  "subdomain": "xmcp",
+  "port": 8061,
+  "summary": "The full X API surface as MCP tools — reads, and OAuth1 user-context writes that act as your X account.",
+  "secrets": [
+    {
+      "key": "X_OAUTH_CONSUMER_KEY",
+      "label": "X app API key",
+      "hint": "developer.x.com → your app → Keys and tokens → 'API Key and Secret'"
+    },
+    {
+      "key": "X_OAUTH_CONSUMER_SECRET",
+      "label": "X app API key secret",
+      "hint": "same card as the API key"
+    },
+    {
+      "key": "X_OAUTH_ACCESS_TOKEN",
+      "label": "X access token",
+      "hint": "'Access Token and Secret' card — generate AFTER the app's user-authentication permission is set to read+write"
+    },
+    {
+      "key": "X_OAUTH_ACCESS_TOKEN_SECRET",
+      "label": "X access token secret",
+      "hint": "same card as the access token"
+    }
+  ],
+  "notes": [
+    "Writes act as YOUR X account — consider gating the write/delete group in the manage panel.",
+    "Read-only alternative: skip the four OAuth values and set X_BEARER_TOKEN (app-only bearer) instead.",
+    "Returns untrusted external content: the guardrail sidecar starts automatically with this tool."
+  ],
+  "depends": []
+}

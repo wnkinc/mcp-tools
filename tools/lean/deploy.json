@@ -1,0 +1,14 @@
+{
+  "title": "Lean backtesting",
+  "profile": "lean",
+  "subdomain": "lean",
+  "port": 8064,
+  "summary": "Self-hosted QuantConnect Lean backtests of agent-authored algorithms, over data the data tool exported.",
+  "secrets": [],
+  "notes": [
+    "Large: the pinned Lean base image is ~13GB — the first deploy pulls it and takes many minutes and real disk.",
+    "Depends on the data tool: backtests only see series exported from its lake (available_data lists them).",
+    "No tool-specific secrets — only the shared Google OAuth identity every tool carries."
+  ],
+  "depends": ["data"]
+}

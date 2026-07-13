@@ -43,7 +43,7 @@ gatekeeper tool ──► approval sidecar (sole authority on modes) ◄── e
   tool is enforced within seconds, but Claude keeps showing a blocked tool in its list
   until the connector's cached `tools/list` refreshes.
 
-## The two surfaces
+## The surfaces
 
 - **`manage_tools`** opens the **permissions panel** in chat: one collapsible section
   per connector (telegram, xmcp, …), tools grouped read-only / write-delete, each with
@@ -58,10 +58,21 @@ gatekeeper tool ──► approval sidecar (sole authority on modes) ◄── e
   changing a safety gate always takes a human approval, and no runtime path — tool or
   widget — can lift that pin.
 
+- **`deploy_status()`** is the read-only deployment inventory: deployed tools (live
+  startup beacons) with last-used, stale leftovers, and undeployed tools from the
+  codebase — each described by its `tools/<name>/deploy.json` manifest (summary, the
+  secrets enabling it needs and where to get them, notes like image size). The agent
+  uses it to answer "what else could I add?" and to walk a manual enable; chat-driven
+  deploys build on it in a later phase.
+
 The gatekeeper itself is **not manageable**: the sidecar refuses every mode write
-against the `gatekeeper` source and leaves it out of the panel. Its two tools' behavior
+against the `gatekeeper` source and leaves it out of the panel. Its tools' behavior
 is fixed in code — `set_gating` always needs approval, and `manage_tools` only ever
 applies what a human reviews and saves.
+
+The panel marks each connector **deployed** (a startup beacon arrived within ~90s) or
+**stale**, and Forget only appears on stale ones — forgetting a live tool would be a
+self-defeating 30-second blip that only wipes its curation.
 
 ## Developing the panel
 

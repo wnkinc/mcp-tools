@@ -1,0 +1,30 @@
+{
+  "title": "Telegram",
+  "profile": "telegram",
+  "subdomain": "telegram",
+  "port": 8063,
+  "summary": "Full Telegram surface (read + write) acting as your Telegram account, via the vendored telegram-mcp engine.",
+  "secrets": [
+    {
+      "key": "TELEGRAM_API_ID",
+      "label": "Telegram API ID",
+      "hint": "my.telegram.org → API development tools → create an app"
+    },
+    {
+      "key": "TELEGRAM_API_HASH",
+      "label": "Telegram API hash",
+      "hint": "same page as the API ID"
+    },
+    {
+      "key": "TELEGRAM_SESSION_STRING",
+      "label": "Telegram session string",
+      "hint": "run the engine's session_string_generator.py once with the ID/hash and log in"
+    }
+  ],
+  "notes": [
+    "Acts as YOUR Telegram account — writes send real messages; consider gating them in the manage panel.",
+    "Returns untrusted external content: the guardrail sidecar starts automatically with this tool.",
+    "If your approval channel is ALSO Telegram, remember the pairing caveat in security/approval/service/env.example."
+  ],
+  "depends": []
+}
