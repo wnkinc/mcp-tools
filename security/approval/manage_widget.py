@@ -37,8 +37,10 @@ def register_manage_widget(mcp) -> None:  # type: ignore[no-untyped-def]
         """Open the tool-permissions panel in the chat: one section per connector
         (telegram, xmcp, ...), every tool with its mode (always_allow /
         needs_approval / blocked), which the USER reviews and saves right in the
-        panel. Nothing changes until the user clicks Save there; to change a mode
-        conversationally instead, use set_gating."""
+        panel. Nothing changes until the user clicks Save there, and the panel
+        locks after one Save (its snapshot is stale then) -- call manage_tools
+        again for another round of changes. To change a mode conversationally
+        instead, use set_gating."""
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(f"{approval_url}/manage", json={})
@@ -54,7 +56,9 @@ def register_manage_widget(mcp) -> None:  # type: ignore[no-untyped-def]
         return (
             "A tool-permissions panel is shown in the chat, one section per connector. "
             "The user reviews each tool's mode there and clicks Save; nothing is "
-            "changed until they do. Saved changes enforce within ~15 seconds, and "
-            "blocked tools drop off a connector's tool list when it refreshes.\n"
+            "changed until they do, and the panel locks after one Save. Saved changes "
+            "enforce within ~15 seconds, blocked tools drop off a connector's tool "
+            "list when it refreshes, and further changes take a fresh manage_tools "
+            "call.\n"
             f"<!--MANAGE {marker}-->"
         )

@@ -34,6 +34,8 @@
   .title{font-weight:600;font-size:14px}
   .sub{color:var(--muted);font-size:12.5px;margin-top:2px}
   .groups{overflow-y:auto;max-height:380px;padding:0 16px}
+  /* after the one-shot save: controls freeze (sections still open/scroll for review) */
+  .groups.locked .seg,.groups.locked .blanket{pointer-events:none;opacity:.55}
   /* connector section (one per source: telegram, xmcp, ...) */
   .shead{display:flex;align-items:center;padding:12px 0 4px}
   .stoggle{display:flex;align-items:center;gap:9px;flex:1;min-width:0;background:none;border:0;
@@ -162,6 +164,7 @@ const titleCase = (name) =>
 const SEP = "\u001f";  // keys span connectors; a char no tool/source name contains
 const K = (src, tool) => src + SEP + tool;
 let ctx = null;          // {token}
+let done = false;        // one-shot: after a save the panel is read-only (view is stale)
 let base = {};           // K(src,tool) -> saved mode (server truth)
 let current = {};        // K(src,tool) -> selected mode
 let pinned = new Set();  // K(src,tool)
@@ -195,8 +198,8 @@ function dirtyMap() {
 
 function refreshChrome() {
   const n = Object.keys(dirtyMap()).length;
-  $("save").disabled = n === 0;
-  $("save").textContent = n ? `Save (${n})` : "Save";
+  $("save").disabled = done || n === 0;
+  $("save").textContent = done ? "Saved" : n ? `Save (${n})` : "Save";
   for (const [tool, els] of Object.entries(rowEls)) {
     els.row.classList.toggle("dirty", current[tool] !== base[tool]);
   }
@@ -214,7 +217,7 @@ function refreshChrome() {
 }
 
 function select(tool, mode) {
-  if (pinned.has(tool)) return;
+  if (done || pinned.has(tool)) return;
   current[tool] = mode;
   const els = rowEls[tool];
   els.thumb.style.transform = `translateX(${MODES.indexOf(mode) * 30}px)`;
@@ -298,6 +301,7 @@ function buildGroup(src, label, tools) {
   });
   bbtn.addEventListener("click", (e) => {
     e.stopPropagation();
+    if (done) return;
     const existing = blanket.querySelector(".menu");
     closeMenus();
     if (existing) return;
@@ -410,9 +414,15 @@ async function save() {
     const srcs = Object.keys(changes).sort();
     const refusedNote = refusedFlat.length
       ? ` (${refusedFlat.join(", ")} is pinned and was not changed)` : "";
+    // One-shot: the server consumed the session token, and this snapshot is now
+    // stale — lock the panel so further edits go through a fresh manage_tools call.
+    done = true;
+    $("groups").classList.add("locked");
+    closeMenus();
     setNote(
       `Saved — enforced within ~15s; refresh the ${srcs.join(" and ")} ` +
-      `connector${srcs.length > 1 ? "s" : ""} to update Claude's tool list.${refusedNote}`,
+      `connector${srcs.length > 1 ? "s" : ""} to update Claude's tool list.${refusedNote} ` +
+      "This panel is now read-only — ask for manage_tools again to make more changes.",
       "ok",
     );
     refreshChrome();

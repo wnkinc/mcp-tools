@@ -696,7 +696,7 @@ def test_manage_session_serves_every_registered_connector():
     assert "gatekeeper" not in sources
 
 
-def test_manage_save_applies_persists_and_allows_resave(tmp_path, monkeypatch):
+def test_manage_save_applies_persists_and_is_one_shot(tmp_path, monkeypatch):
     monkeypatch.setenv("APPROVAL_STATE_FILE", str(tmp_path / "s.json"))
     c = TestClient(svc.app)
     token = _mint(c)
@@ -719,11 +719,26 @@ def test_manage_save_applies_persists_and_allows_resave(tmp_path, monkeypatch):
     assert c.get("/gating", params={"source": "othertool"}).json()["modes"] == {
         "get_me": "needs_approval"
     }
-    # The same session token allows further saves while alive.
+    # ONE-SHOT: a successful save consumed the session (its snapshot is stale now) --
+    # the same token neither saves again nor serves the catalog. Fresh call, fresh view.
     again = c.post(
         f"/manage/{token}", json={"changes": {"teltool": {"send_message": "always_allow"}}}
-    ).json()
-    assert again["ok"] is True and again["applied"] == 1
+    )
+    assert again.status_code == 404
+    assert c.get(f"/manage/{token}").status_code == 404
+    assert c.get("/gating", params={"source": "teltool"}).json()["modes"] == {
+        "send_message": "blocked"  # the replayed save changed nothing
+    }
+
+
+def test_manage_save_with_invalid_modes_keeps_the_session():
+    # A 400 (nothing applied) must not burn the one-shot token: the user fixes the
+    # widget state and saves again on the same session.
+    c = TestClient(svc.app)
+    token = _mint(c)
+    assert c.post(f"/manage/{token}", json={"changes": {"t": {"a": "sideways"}}}).status_code == 400
+    ok = c.post(f"/manage/{token}", json={"changes": {"t": {"a": "blocked"}}}).json()
+    assert ok["ok"] is True and ok["applied"] == 1
 
 
 def test_manage_save_respects_pins_and_validates_modes():

@@ -739,8 +739,10 @@ async def gating(request):  # type: ignore[no-untyped-def]
 # tool can start a session; the widget in the user's browser redeems it. The
 # human's click on Save IS the authorization (the model can't make HTTP requests),
 # which is why a save needs no approval card. Pins still hold: a change to a
-# _PINNED entry is refused here too. Tokens share the approval TTL and allow
-# multiple saves while alive (it's an editing session, not a one-shot).
+# _PINNED entry is refused here too. Tokens share the approval TTL and are ONE-SHOT:
+# a successful save consumes the session, because the panel's snapshot is stale the
+# moment modes change -- further edits go through a fresh manage_tools call (and a
+# fresh view of the current state).
 _MANAGE: dict[str, dict] = {}  # token -> {"source": str, "created": float}
 
 # The token in the URL is the credential, so any browser origin may call these
@@ -801,6 +803,7 @@ async def manage_session(request):  # type: ignore[no-untyped-def]
                     modes[tool] = mode
                     applied += 1
         _save_state()
+        _MANAGE.pop(request.path_params["token"], None)  # one-shot: the view is stale now
         log.info("manage save: %d applied, refused=%s", applied, refused)
         return JSONResponse(
             {"ok": True, "applied": applied, "refused": refused}, headers=_MANAGE_CORS

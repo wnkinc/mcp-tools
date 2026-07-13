@@ -37,7 +37,9 @@ gatekeeper tool ──► approval sidecar (sole authority on modes) ◄── e
   per connector (telegram, xmcp, …), tools grouped read-only / write-delete, each with
   an always-allow / needs-approval / blocked control. Review, then **Save** —
   one save can span connectors. The human's click is the authorization, so a save takes
-  no approval card. (See `security/approval/manage_widget.py` and
+  no approval card. Sessions are **one-shot**: after a save the panel locks (its
+  snapshot is stale the moment modes change) — call `manage_tools` again for a fresh
+  view and another round. (See `security/approval/manage_widget.py` and
   `security/approval/widgets/manage.html`.)
 - **`set_gating(tool, mode, source)`** is the conversational path — change one tool by
   name. It is itself **pinned to `needs_approval` in code** (`_PINNED` in the sidecar):
