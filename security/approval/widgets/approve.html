@@ -43,11 +43,9 @@
     cursor:pointer;transition:background .1s}
   button:disabled{opacity:.45;cursor:default}
   button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  /* filled primary (affirmative, right) + quiet tonal secondary (dismissive, left) */
-  .approve{background:var(--accent);color:var(--accent-ink)}
-  .approve:hover:enabled{background:var(--accent-hover)}
-  .deny{background:var(--tint);color:var(--ink-2)}
-  .deny:hover:enabled{background:var(--border)}
+  /* both actions transparent: hairline outline, matched ink, no visual rank */
+  .approve,.deny{background:transparent;border:1px solid var(--border);color:var(--ink)}
+  .approve:hover:enabled,.deny:hover:enabled{background:var(--tint)}
   button:active:enabled{opacity:.8}
   .inline-err{margin-top:10px;font-size:12px;color:var(--no)}
   /* decided panel */
