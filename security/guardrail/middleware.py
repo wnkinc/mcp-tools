@@ -102,18 +102,35 @@ class GuardrailMiddleware(Middleware):
         if not text.strip():
             return result
 
-        decision, score = "error", None
+        decision, score, fail_reason = "error", None, None
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.post(
                     f"{self.guardrail_url}/scan", json={"text": text, "role": "user"}
                 )
+            if resp.status_code == 503:
+                # Service up, provider still warming: llamafirewall downloads the
+                # PromptGuard model on first start; bedrock runs a warmup call.
+                fail_reason = (
+                    "the screening provider is still starting up (a first start "
+                    "downloads the screening model); retry shortly"
+                )
+            elif resp.status_code != 200:
+                fail_reason = f"the screening service answered HTTP {resp.status_code}"
+            else:
                 data = resp.json()
                 decision = data.get("decision", "error")
                 score = data.get("score")
-        except Exception:  # noqa: BLE001 - any failure fails CLOSED below
+        except httpx.TransportError:
             LOGGER.warning("guardrail unreachable at %s -- failing closed", self.guardrail_url)
-            decision = "error"
+            fail_reason = (
+                "the guardrail container is unreachable: it is not deployed, or it "
+                "failed at startup and its container logs name the cause (for example "
+                "a missing HF_TOKEN model grant or BEDROCK_GUARDRAIL_ID)"
+            )
+        except Exception:  # noqa: BLE001 - any failure fails CLOSED below
+            LOGGER.warning("guardrail scan failed at %s -- failing closed", self.guardrail_url)
+            fail_reason = "the screening request failed unexpectedly"
 
         tool_name = getattr(getattr(context, "message", None), "name", "?")
         if decision == "allow":
@@ -133,8 +150,9 @@ class GuardrailMiddleware(Middleware):
             return _withhold(
                 "[guardrail: human review requested for the returned content; withheld.]"
             )
-        # error / unreachable -> fail closed
+        # error / unreachable -> fail closed, naming the actual cause
         return _withhold(
-            f"[guardrail: screen unavailable ({self.guardrail_url}) -- failing CLOSED, "
-            f"results withheld.]"
+            "[guardrail: screening unavailable -- "
+            f"{fail_reason or 'the screening service returned no decision'}. "
+            "Failing CLOSED, results withheld.]"
         )

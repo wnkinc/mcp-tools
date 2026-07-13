@@ -24,9 +24,10 @@ Claude takes it from there.
 
 ## FAQs
 Each tool is opt-in via a compose profile named after it — only the tools in
-`COMPOSE_PROFILES` are built and started. The guardrail (output screen for untrusted
-tools) rides the same mechanism, with an env-chosen provider: a local model
-(`llamafirewall`) or Amazon Bedrock Guardrails (`bedrock`).
+`COMPOSE_PROFILES` are built and started, and that list is the only deploy-time
+choice. The rest is automatic: the guardrail (output screen) starts alongside any
+untrusted tool, with an env-chosen provider — a local model (`llamafirewall`,
+default) or Amazon Bedrock Guardrails (`bedrock`, the AWS-deploy pick).
 
 New tool: `scripts/new-tool.sh`. Deploying:
 **[docs/DEPLOY.md](docs/DEPLOY.md)**. How it fits together:

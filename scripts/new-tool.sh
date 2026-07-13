@@ -58,7 +58,9 @@ def ping() -> str:
 def main() -> None:
     port = int(os.getenv("MCP_PORT", "${PORT}"))
     # Trusted internal tool by default. If this tool returns UNTRUSTED external
-    # content, add: untrusted_output=True (guardrail) and/or require_approval=True.
+    # content, add: untrusted_output=True (guardrail) and/or require_approval=True --
+    # and add this tool's profile name to the guardrail service's \`profiles\` list
+    # in docker-compose.yml so the screen starts with it automatically.
     serve(mcp, port=port)
 
 

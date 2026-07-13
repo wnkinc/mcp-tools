@@ -22,9 +22,10 @@ cd mcp-tools
 cp env.example .env
 ```
 
-In `.env`, set `COMPOSE_PROFILES` to your tools plus the guardrail, e.g.
-`xmcp,data,guardrail`. Every profile is opt-in; only listed services build and
-run.
+In `.env`, set `COMPOSE_PROFILES` to your tools, e.g. `xmcp,data`. That's the
+only deploy-time choice: only listed tools build and run, and the substrate
+(egress wall, approval sidecar, gatekeeper, and — whenever an untrusted tool
+like xmcp/telegram is listed — the guardrail) comes up on its own.
 
 ## 2. Guardrail (output screen)
 
@@ -38,9 +39,11 @@ Default provider is `llamafirewall` — a local model, no cloud account involved
    the guardrail runs degraded (HiddenASCII-only) and says so on its
    `/healthz`.
 
-Turning the screen **off** instead: remove `guardrail` from `COMPOSE_PROFILES`
-**and** set `GUARDRAIL_ENABLED=0` — the pair matters, because untrusted tools
-with screening on and the service absent withhold all results (fail closed).
+Running the untrusted tools **unscreened** instead (not recommended): set
+`GUARDRAIL_ENABLED=0`. With screening on and the screen broken, those tools
+fail closed — results are withheld with a message naming the cause (container
+not running, model still downloading on first start, or a missing
+HF_TOKEN/BEDROCK_GUARDRAIL_ID in the container logs).
 
 ## 3. Cloudflare: domain, tunnel, DNS (the shared Pulumi stack)
 
