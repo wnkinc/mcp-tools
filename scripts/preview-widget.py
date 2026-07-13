@@ -12,6 +12,7 @@ edit manage.html and just reload the browser. Append ?theme=dark for dark mode.
 
 import json
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -27,6 +28,7 @@ CATALOG = {
     "sources": {
         "telegram": {
             "pinned": ["send_message"],
+            "last_seen": time.time() - 7200,  # "last used 2h ago"
             "tools": {
                 "get_me": {"description": "", "read_only": True, "mode": "always_allow"},
                 "get_chats": {"description": "", "read_only": True, "mode": "always_allow"},
@@ -40,6 +42,7 @@ CATALOG = {
         },
         "xmcp": {
             "pinned": [],
+            "last_seen": None,  # "never used"
             "tools": {
                 "searchPostsRecent": {"description": "", "read_only": True, "mode": "always_allow"},
                 "getUserByUsername": {"description": "", "read_only": True, "mode": "always_allow"},
@@ -70,8 +73,9 @@ const REAL_FETCH = window.fetch.bind(window);
 window.fetch = async (url, opts = {}) => {
   if (!String(url).includes("/manage/")) return REAL_FETCH(url, opts);
   if ((opts.method || "GET") === "POST") {
-    const changes = JSON.parse(opts.body).changes;
+    const { changes, forget = [] } = JSON.parse(opts.body);
     const refused = {};
+    const forgotten = [];
     let applied = 0;
     for (const [src, tools] of Object.entries(changes)) {
       const info = window.__CATALOG.sources[src];
@@ -80,7 +84,10 @@ window.fetch = async (url, opts = {}) => {
         else { info.tools[t].mode = m; applied += 1; }
       }
     }
-    return new Response(JSON.stringify({ ok: true, applied, refused }), { status: 200 });
+    for (const src of forget) {
+      if (window.__CATALOG.sources[src]) { delete window.__CATALOG.sources[src]; forgotten.push(src); applied += 1; }
+    }
+    return new Response(JSON.stringify({ ok: true, applied, forgotten, refused }), { status: 200 });
   }
   return new Response(JSON.stringify(window.__CATALOG), { status: 200 });
 };

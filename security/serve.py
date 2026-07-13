@@ -23,9 +23,12 @@ A tool declares its threat posture in one line::
 
 from __future__ import annotations
 
+import contextlib
 import os
 
-from security.approval.middleware import ApprovalMiddleware
+from starlette.responses import JSONResponse
+
+from security.approval.middleware import ApprovalMiddleware, register_catalog
 from security.auth import build_oauth_provider
 from security.guardrail.middleware import GuardrailMiddleware
 
@@ -154,6 +157,27 @@ def serve(
             "posts a fresh card."
         )
         mcp.instructions = f"{mcp.instructions}\n\n{note}" if mcp.instructions else note
+
+    # /healthz: the container healthcheck target (unauthenticated liveness -- custom
+    # routes sit outside the MCP OAuth guard). It runs in the server's OWN event loop,
+    # so on approval-enabled servers it doubles as STARTUP catalog registration: the
+    # manage panel lists every DEPLOYED tool without waiting for a client, and each
+    # probe re-beacons, so a wiped sidecar state refills within one probe cycle.
+    # origin="startup" -- the sidecar does not stamp "last used" from this; only real
+    # client tools/list traffic does (see ApprovalMiddleware.on_list_tools).
+    approval_url = os.getenv("APPROVAL_URL", "http://127.0.0.1:8072").rstrip("/")
+
+    @mcp.custom_route("/healthz", methods=["GET"])
+    async def _healthz(request):  # type: ignore[no-untyped-def]
+        if require_approval:
+            with contextlib.suppress(Exception):
+                # run_middleware=False: the probe must not traverse ApprovalMiddleware,
+                # whose on_list_tools registers origin="list" -- that stamp means "a
+                # real client asked" and a health probe is not one.
+                tools = await mcp.list_tools(run_middleware=False)
+                await register_catalog(source, tools, approval_url, origin="startup")
+        return JSONResponse({"ok": True, "server": source})
+
     if untrusted_output:
         mcp.add_middleware(
             GuardrailMiddleware(

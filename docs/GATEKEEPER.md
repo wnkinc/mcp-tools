@@ -22,11 +22,23 @@ gatekeeper tool ──► approval sidecar (sole authority on modes) ◄── e
 - **The sidecar is the only place modes live.** There is no allowlist in code. A tool
   with no stored choice is `always_allow` — deliberately ship-open, so a fresh install
   has a working connector; you curate from there.
-- **Each server registers its catalog** with the sidecar on its first `tools/list`
-  (name, description, and a read-only flag from the tool's MCP annotations, with the
-  spec default applied: only an explicit `readOnlyHint: true` is read-only — the same
-  rule Claude's own connector UI groups by). Until a connector has listed once, it
-  won't appear in the panel.
+- **The panel shows what this deployment serves.** Each approval-enabled server
+  registers its catalog with the sidecar **at startup** (its container health probe
+  hits `serve()`'s `/healthz`, which re-beacons every ~30s) — so a freshly deployed
+  tool appears in the panel, and can be pre-gated, before Claude ever connects to it.
+  The catalog carries name, description, and a read-only flag from the tool's MCP
+  annotations, with the spec default applied: only an explicit `readOnlyHint: true`
+  is read-only — the same rule Claude's own connector UI groups by.
+- **"Last used" is the Claude-side signal.** The server can't know what's attached to
+  a claude.ai account (removal is silent, there's no account API), so each connector
+  section carries an honest label instead: the last time a real authenticated client
+  did `tools/list` ("last used 2h ago" / "never used"). Startup re-registration
+  deliberately doesn't count as use.
+- **Forget** removes a connector's stored state (catalog, modes, timestamps) — the
+  per-section button in the panel, applied on Save. A still-deployed server simply
+  re-registers on its next health probe; one you removed from `COMPOSE_PROFILES` (or
+  detached in Claude and no longer want listed) stays gone. Forgetting deletes stored
+  modes, so a returning connector starts back at ship-open `always_allow`.
 - **Enforcement is immediate (~15s cache); invisibility lags.** A blocked or gated
   tool is enforced within seconds, but Claude keeps showing a blocked tool in its list
   until the connector's cached `tools/list` refreshes.

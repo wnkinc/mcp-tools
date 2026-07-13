@@ -12,7 +12,9 @@ from types import SimpleNamespace
 import httpx as _httpx
 import pytest
 from fastmcp import FastMCP
+from starlette.testclient import TestClient as _StarletteClient
 
+import security.approval.middleware as _amod
 import security.guardrail.middleware as _gmod
 from security.approval.middleware import ApprovalMiddleware
 from security.guardrail.middleware import GuardrailMiddleware
@@ -262,3 +264,71 @@ def test_guardrail_warming_up_says_retry(monkeypatch):
 def test_guardrail_allow_still_wraps(monkeypatch):
     text = _screened_text(monkeypatch, _client_returning(200, {"decision": "allow", "score": 0.0}))
     assert "untrusted_content" in text and "external content" in text
+
+
+# --- /healthz: liveness + startup catalog registration ------------------------------
+
+
+def _capture_posts(monkeypatch):
+    posted = []
+
+    class _Cap:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            posted.append((url, json))
+            return _httpx.Response(200, json={"ok": True}, request=_httpx.Request("POST", url))
+
+    monkeypatch.setattr(_amod.httpx, "AsyncClient", _Cap)
+    return posted
+
+
+def test_healthz_startup_registers_the_catalog(monkeypatch):
+    # The container healthcheck target doubles as startup registration: the manage
+    # panel shows every DEPLOYED tool without waiting for a client, tagged
+    # origin=startup so the sidecar does NOT count it as the source being used.
+    posted = _capture_posts(monkeypatch)
+    mcp = _mcp()
+    _serve_captured(mcp, require_approval=True)
+    with _StarletteClient(mcp.http_app()) as client:
+        r = client.get("/healthz")
+    assert r.status_code == 200 and r.json() == {"ok": True, "server": "t"}
+    (url, payload) = posted[0]
+    assert url.endswith("/catalog") and payload["origin"] == "startup"
+    assert payload["source"] == "t"
+    assert [t["name"] for t in payload["tools"]] == ["add"]
+
+
+def test_healthz_without_approval_is_plain_liveness(monkeypatch):
+    posted = _capture_posts(monkeypatch)
+    mcp = _mcp()
+    _serve_captured(mcp)
+    with _StarletteClient(mcp.http_app()) as client:
+        assert client.get("/healthz").status_code == 200
+    assert posted == []
+
+
+def test_healthz_answers_even_with_the_sidecar_down(monkeypatch):
+    # Registration is best-effort: health must not depend on the approval sidecar.
+    class _Boom:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            raise _httpx.ConnectError("refused")
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(_amod.httpx, "AsyncClient", _Boom)
+    mcp = _mcp()
+    _serve_captured(mcp, require_approval=True)
+    with _StarletteClient(mcp.http_app()) as client:
+        assert client.get("/healthz").status_code == 200

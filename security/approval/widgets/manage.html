@@ -44,6 +44,15 @@
     font-size:11px;color:var(--ink-2);background:var(--thumb);border:1px solid var(--border);
     border-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
   .sname{font-weight:600;font-size:13.5px}
+  .lastseen{flex:none;font-size:11px;color:var(--muted);margin-left:2px}
+  /* forget: a quiet per-connector text button; marked sections gray out until Save */
+  .fbtn{flex:none;font:inherit;font-size:11.5px;color:var(--muted);background:none;
+    border:0;padding:2px 6px;border-radius:6px;cursor:pointer}
+  .fbtn:hover{color:var(--no);background:var(--tint)}
+  .srcsec.forgotten .stoggle{opacity:.45}
+  .srcsec.forgotten .sname{text-decoration:line-through}
+  .srcsec.forgotten .fbtn{color:var(--no)}
+  .groups.locked .fbtn{pointer-events:none;opacity:.55}
   /* group header row */
   .ghead{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
   .gtoggle{display:flex;align-items:center;gap:10px;flex:1;min-width:0;background:none;border:0;
@@ -168,6 +177,7 @@ let done = false;        // one-shot: after a save the panel is read-only (view 
 let base = {};           // K(src,tool) -> saved mode (server truth)
 let current = {};        // K(src,tool) -> selected mode
 let pinned = new Set();  // K(src,tool)
+let forgets = new Set(); // sources marked to be forgotten on Save
 let rowEls = {};         // K(src,tool) -> {row, seg, thumb, btns}
 let groupState = {};     // "src|label" -> {keys, bicon, blabel}
 
@@ -196,8 +206,19 @@ function dirtyMap() {
   return d;
 }
 
+// "Last used" = the last time a CLIENT (Claude) listed this connector's tools; the
+// server can't know account attachment, so this label is the honest signal.
+function fmtLastSeen(epoch) {
+  if (!epoch) return "never used";
+  const s = Math.max(0, Date.now() / 1000 - epoch);
+  if (s < 90) return "just used";
+  if (s < 5400) return `last used ${Math.round(s / 60)}m ago`;
+  if (s < 129600) return `last used ${Math.round(s / 3600)}h ago`;
+  return `last used ${Math.round(s / 86400)}d ago`;
+}
+
 function refreshChrome() {
-  const n = Object.keys(dirtyMap()).length;
+  const n = Object.keys(dirtyMap()).length + forgets.size;
   $("save").disabled = done || n === 0;
   $("save").textContent = done ? "Saved" : n ? `Save (${n})` : "Save";
   for (const [tool, els] of Object.entries(rowEls)) {
@@ -336,8 +357,25 @@ function buildSource(src, info) {
   const count = Object.keys(info.tools).length;
   stoggle.innerHTML =
     `<span class="chev">${CHEV}</span><span class="sava">${src[0].toUpperCase()}</span>` +
-    `<span class="sname">${titleCase(src)}</span><span class="count">${count}</span>`;
-  shead.append(stoggle);
+    `<span class="sname">${titleCase(src)}</span><span class="count">${count}</span>` +
+    `<span class="lastseen">${fmtLastSeen(info.last_seen)}</span>`;
+  // Forget: drop this connector's stored state (catalog, modes, last-seen) on Save.
+  // A still-deployed server re-registers on its next health probe; one removed from
+  // the deployment (or detached in Claude) stays gone.
+  const fbtn = document.createElement("button");
+  fbtn.type = "button";
+  fbtn.className = "fbtn";
+  fbtn.textContent = "Forget";
+  fbtn.title = "Remove this connector's stored permissions and history on Save.";
+  fbtn.addEventListener("click", () => {
+    if (done) return;
+    if (forgets.has(src)) forgets.delete(src); else forgets.add(src);
+    const marked = forgets.has(src);
+    fbtn.textContent = marked ? "Undo" : "Forget";
+    wrap.classList.toggle("forgotten", marked);
+    refreshChrome();
+  });
+  shead.append(stoggle, fbtn);
   const content = document.createElement("div");
   content.hidden = true;
   // Same buckets as Claude's connector UI, which applies the MCP spec default:
@@ -362,7 +400,7 @@ function buildSource(src, info) {
 
 function render(data) {
   base = {}; current = {}; rowEls = {}; groupState = {};
-  pinned = new Set();
+  pinned = new Set(); forgets = new Set();
   const sources = Object.entries(data.sources || {}).sort(([a], [b]) => a.localeCompare(b));
   for (const [src, info] of sources) {
     for (const t of info.pinned || []) pinned.add(K(src, t));
@@ -386,12 +424,13 @@ function render(data) {
 
 async function save() {
   const dirty = dirtyMap();
-  if (!Object.keys(dirty).length) return;
-  // Nest the flat keys back into {source: {tool: mode}} for the wire.
+  if (!Object.keys(dirty).length && !forgets.size) return;
+  // Nest the flat keys back into {source: {tool: mode}} for the wire; a forgotten
+  // source's mode edits are moot (its whole state goes).
   const changes = {};
   for (const [key, mode] of Object.entries(dirty)) {
     const [src, tool] = key.split(SEP);
-    (changes[src] ??= {})[tool] = mode;
+    if (!forgets.has(src)) (changes[src] ??= {})[tool] = mode;
   }
   $("save").disabled = true;
   setNote("Saving…");
@@ -399,7 +438,7 @@ async function save() {
     const resp = await fetch(`${PUBLIC_BASE}/manage/${ctx.token}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ changes }),
+      body: JSON.stringify({ changes, forget: [...forgets] }),
     });
     if (resp.status === 404) { setNote("Session expired — ask for the panel again.", "err"); return; }
     const data = await resp.json();
@@ -411,9 +450,11 @@ async function save() {
         else base[K(src, tool)] = mode;
       }
     }
-    const srcs = Object.keys(changes).sort();
+    const srcs = [...new Set([...Object.keys(changes), ...(data.forgotten || [])])].sort();
     const refusedNote = refusedFlat.length
       ? ` (${refusedFlat.join(", ")} is pinned and was not changed)` : "";
+    const forgotNote = data.forgotten?.length
+      ? ` Forgot ${data.forgotten.sort().join(", ")}.` : "";
     // One-shot: the server consumed the session token, and this snapshot is now
     // stale — lock the panel so further edits go through a fresh manage_tools call.
     done = true;
@@ -421,7 +462,8 @@ async function save() {
     closeMenus();
     setNote(
       `Saved — enforced within ~15s; refresh the ${srcs.join(" and ")} ` +
-      `connector${srcs.length > 1 ? "s" : ""} to update Claude's tool list.${refusedNote}`,
+      `connector${srcs.length > 1 ? "s" : ""} to update Claude's tool list.` +
+      `${forgotNote}${refusedNote}`,
       "ok",
     );
     refreshChrome();

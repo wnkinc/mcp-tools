@@ -63,6 +63,40 @@ def _call_key(tool_name: str, args: dict) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
+async def register_catalog(  # type: ignore[no-untyped-def]
+    source: str, tools, approval_url: str, *, origin: str, timeout: float = 10.0
+) -> None:
+    """Publish the FULL tool catalog to the sidecar (the operator's unfiltered view --
+    the gatekeeper and the permissions widget read it from there). Best-effort: a down
+    sidecar never breaks the caller. Two origins, same payload:
+
+    - "startup": the server announcing itself (serve()'s /healthz probe path), so the
+      panel shows every DEPLOYED tool without waiting for a client. Repeats each
+      probe -- idempotent, and it refills a wiped sidecar state within a probe cycle.
+    - "list": a real authenticated client asked for tools/list; the sidecar also
+      stamps the source's last-seen from it (the panel's "last used" label).
+    """
+    payload = {
+        "source": source,
+        "origin": origin,
+        "tools": [
+            {
+                "name": t.name,
+                "description": t.description or "",
+                # Claude's connector UI groups by readOnlyHint with the MCP spec
+                # default applied: only an explicit true is read-only; false OR
+                # absent means write/delete. Mirror that so the panel groups
+                # exactly like Claude's own permissions screen.
+                "read_only": bool(t.annotations and getattr(t.annotations, "readOnlyHint", False)),
+            }
+            for t in tools
+        ],
+    }
+    with contextlib.suppress(Exception):
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            await client.post(f"{approval_url}/catalog", json=payload)
+
+
 class ApprovalMiddleware(Middleware):
     """Enforce each tool's sidecar-held mode (always_allow / needs_approval / blocked).
 
@@ -90,46 +124,18 @@ class ApprovalMiddleware(Middleware):
         # can't fetch) as a JSON payload the widget reads; the tool is tagged elsewhere
         # (WidgetMetaMiddleware) so this result renders the card. No out-of-band card needed.
         self._widget = widget
-        self._catalog_sent: str | None = None  # last successfully registered payload
-
-    async def _register_catalog(self, tools) -> None:  # type: ignore[no-untyped-def]
-        """Publish the FULL tool catalog to the sidecar (the operator's unfiltered
-        view -- the gatekeeper and the permissions widget read it from there).
-        Best-effort and idempotent: skipped while unchanged, and a down sidecar
-        never breaks tools/list."""
-        payload = {
-            "source": self.source,
-            "tools": [
-                {
-                    "name": t.name,
-                    "description": t.description or "",
-                    # Claude's connector UI groups by readOnlyHint with the MCP spec
-                    # default applied: only an explicit true is read-only; false OR
-                    # absent means write/delete. Mirror that so the panel groups
-                    # exactly like Claude's own permissions screen.
-                    "read_only": bool(
-                        t.annotations and getattr(t.annotations, "readOnlyHint", False)
-                    ),
-                }
-                for t in tools
-            ],
-        }
-        blob = json.dumps(payload, sort_keys=True)
-        if blob == self._catalog_sent:
-            return
-        with contextlib.suppress(Exception):
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(f"{self.approval_url}/catalog", json=payload)
-            resp.raise_for_status()
-            self._catalog_sent = blob
 
     async def on_list_tools(self, context, call_next):  # type: ignore[no-untyped-def]
         # This is the one place the full list passes by: register it as the catalog,
         # then filter blocked tools from what Claude sees. The connector caches
         # tools/list until refreshed, so the filter is cosmetic latency-wise -- the
-        # call-time refusal below is the actual gate.
+        # call-time refusal below is the actual gate. origin="list" doubles as the
+        # liveness beacon: the sidecar stamps the source's last-seen from it (a real,
+        # authenticated client asked), which the manage panel shows as "last used".
         tools = await call_next(context)
-        await self._register_catalog(tools)
+        await register_catalog(
+            self.source, tools, self.approval_url, origin="list", timeout=self.timeout
+        )
         modes = await fetch_modes(self.source, self.approval_url)
         if modes is None:  # nothing known -> can't tell what's blocked; calls fail closed
             return tools

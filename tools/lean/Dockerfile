@@ -44,8 +44,11 @@ RUN mkdir -p /app/state && chown -R app:app /app/state
 USER app
 WORKDIR /app/tools/lean
 EXPOSE 8064
+# GET /healthz (serve()'s liveness route) rather than a bare TCP connect: the probe
+# runs in the server's event loop, where it doubles as the sidecar catalog
+# registration that puts this tool in the manage panel at startup.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import os,socket; socket.create_connection(('127.0.0.1', int(os.environ.get('MCP_PORT','8064'))), timeout=3).close()" || exit 1
+    CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('MCP_PORT','8064') + '/healthz', timeout=4)" || exit 1
 # Overrides the base image's `dotnet QuantConnect.Lean.Launcher.dll` entrypoint: the
 # wrapper is the process; it invokes the launcher per backtest.
 ENTRYPOINT ["python", "server.py"]

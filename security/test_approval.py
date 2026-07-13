@@ -853,3 +853,63 @@ def test_register_manage_widget_wires_the_ui_resource(monkeypatch):
     assert uri.startswith("ui://manage.gatekeeper.")
     assert uri in fake.resources
     assert "Tool permissions" in fake.resources[uri]()  # the widget HTML
+
+
+# --- deployed-model panel: last-seen stamps, startup registration, forget -------------
+
+
+def test_catalog_origin_stamps_seen_only_for_client_lists():
+    c = TestClient(svc.app)
+    # startup: the deployed server announcing itself -- registered, but never "used"
+    c.post(
+        "/catalog",
+        json={"source": "newtool", "origin": "startup", "tools": [{"name": "a"}]},
+    )
+    st = svc._STATE["newtool"]
+    assert st["catalog"] and st.get("registered") and st.get("seen") is None
+    # a real client list stamps last-seen (absent origin = legacy middleware = list)
+    c.post("/catalog", json={"source": "newtool", "origin": "list", "tools": [{"name": "a"}]})
+    assert svc._STATE["newtool"]["seen"] is not None
+
+
+def test_manage_session_carries_last_seen():
+    c = TestClient(svc.app)
+    c.post("/catalog", json={"source": "fresh", "origin": "startup", "tools": [{"name": "a"}]})
+    c.post("/catalog", json={"source": "used", "origin": "list", "tools": [{"name": "b"}]})
+    sources = c.get(f"/manage/{_mint(c)}").json()["sources"]
+    assert sources["fresh"]["last_seen"] is None  # deployed but never listed by a client
+    assert isinstance(sources["used"]["last_seen"], float)
+
+
+def test_manage_forget_drops_a_source_and_consumes_the_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPROVAL_STATE_FILE", str(tmp_path / "s.json"))
+    c = TestClient(svc.app)
+    c.post("/catalog", json={"source": "oldtool", "tools": [{"name": "a"}]})
+    _set_mode(c, "a", "blocked", source="oldtool")
+    token = _mint(c)
+    r = c.post(f"/manage/{token}", json={"changes": {}, "forget": ["oldtool"]}).json()
+    assert r["ok"] is True and r["forgotten"] == ["oldtool"]
+    # Gone entirely -- catalog, modes, and restart-proof (the file was rewritten).
+    assert "oldtool" not in svc._STATE
+    svc._STATE.clear()
+    svc._load_state()
+    assert "oldtool" not in svc._STATE
+    assert c.get("/gating", params={"source": "oldtool"}).json()["modes"] == {}
+    # One-shot: the forget consumed the session like any save.
+    assert c.get(f"/manage/{token}").status_code == 404
+
+
+def test_manage_forget_refuses_the_gatekeeper():
+    c = TestClient(svc.app)
+    r = c.post(f"/manage/{_mint(c)}", json={"forget": ["gatekeeper"]}).json()
+    assert r["forgotten"] == [] and r["refused"] == {"gatekeeper": ["*forget*"]}
+
+
+def test_manage_forget_wins_over_mode_edits_to_the_same_source():
+    c = TestClient(svc.app)
+    c.post("/catalog", json={"source": "srcx", "tools": [{"name": "a"}]})
+    r = c.post(
+        f"/manage/{_mint(c)}",
+        json={"changes": {"srcx": {"a": "blocked"}}, "forget": ["srcx"]},
+    ).json()
+    assert r["forgotten"] == ["srcx"] and "srcx" not in svc._STATE

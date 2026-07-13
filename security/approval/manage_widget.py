@@ -34,13 +34,14 @@ def register_manage_widget(mcp) -> None:  # type: ignore[no-untyped-def]
 
     @mcp.tool(meta={"ui": {"resourceUri": uri}, "ui/resourceUri": uri})
     async def manage_tools() -> str:
-        """Open the tool-permissions panel in the chat: one section per connector
-        (telegram, xmcp, ...), every tool with its mode (always_allow /
-        needs_approval / blocked), which the USER reviews and saves right in the
-        panel. Nothing changes until the user clicks Save there, and the panel
-        locks after one Save (its snapshot is stale then) -- call manage_tools
-        again for another round of changes. To change a mode conversationally
-        instead, use set_gating."""
+        """Open the tool-permissions panel in the chat: one section per DEPLOYED
+        connector (telegram, xmcp, ...) with a "last used" label, every tool with
+        its mode (always_allow / needs_approval / blocked), and a per-connector
+        Forget that drops a stale connector's stored state. The USER reviews and
+        saves right in the panel; nothing changes until they click Save, and the
+        panel locks after one Save (its snapshot is stale then) -- call
+        manage_tools again for another round of changes. To change a mode
+        conversationally instead, use set_gating."""
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(f"{approval_url}/manage", json={})

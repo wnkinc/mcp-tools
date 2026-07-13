@@ -682,7 +682,8 @@ async def catalog(request):  # type: ignore[no-untyped-def]
     if request.method == "POST":
         body = await request.json()
         source = body["source"]
-        _source_state(source)["catalog"] = {
+        st = _source_state(source)
+        st["catalog"] = {
             # read_only follows the MCP spec default Claude's UI applies: only an
             # explicit readOnlyHint=true is read-only; false, absent, or a legacy
             # null all mean write/delete.
@@ -692,9 +693,16 @@ async def catalog(request):  # type: ignore[no-untyped-def]
             }
             for t in body.get("tools") or []
         }
+        # Two origins (see middleware.register_catalog): "startup" = the deployed
+        # server announcing itself; "list" = a real authenticated client asked, which
+        # is the ONLY thing that counts as the source being USED (the panel's
+        # "last used" label). Absent origin (older middleware) counts as list.
+        st["registered"] = time.time()
+        if body.get("origin", "list") == "list":
+            st["seen"] = time.time()
         _save_state()
-        n = len(_STATE[source]["catalog"])
-        log.info("catalog registered: %s (%d tools)", source, n)
+        n = len(st["catalog"])
+        log.info("catalog registered: %s (%d tools, origin=%s)", source, n, body.get("origin"))
         return JSONResponse({"ok": True, "source": source, "count": n})
     source = request.query_params.get("source", "")
     modes = _effective_modes(source)
@@ -778,8 +786,13 @@ async def manage_session(request):  # type: ignore[no-untyped-def]
             {"ok": False, "error": "expired"}, status_code=404, headers=_MANAGE_CORS
         )
     if request.method == "POST":
-        # {"changes": {source: {tool: mode}}} -- one save can span connectors.
-        changes = (await request.json()).get("changes") or {}
+        # {"changes": {source: {tool: mode}}, "forget": [source, ...]} -- one save can
+        # span connectors, and can drop a connector's stored state entirely (its
+        # catalog, modes, and timestamps; a still-deployed server simply re-registers
+        # on its next healthz probe, a removed one stays gone).
+        body = await request.json()
+        changes = body.get("changes") or {}
+        forget = body.get("forget") or []
         bad = [
             f"{src}/{tool}={mode}"
             for src, tools in changes.items()
@@ -795,6 +808,8 @@ async def manage_session(request):  # type: ignore[no-untyped-def]
         refused: dict[str, list[str]] = {}
         applied = 0
         for src, tools in changes.items():
+            if src in forget:  # forgetting wins; mode edits to it are moot
+                continue
             modes = _source_state(src)["modes"]
             for tool, mode in tools.items():
                 if src in _UNMANAGED_SOURCES or (src, tool) in _PINNED:
@@ -802,11 +817,19 @@ async def manage_session(request):  # type: ignore[no-untyped-def]
                 else:
                     modes[tool] = mode
                     applied += 1
+        forgotten = []
+        for src in forget:
+            if src in _UNMANAGED_SOURCES:
+                refused.setdefault(src, []).append("*forget*")
+            elif _STATE.pop(src, None) is not None:
+                forgotten.append(src)
+                applied += 1
         _save_state()
         _MANAGE.pop(request.path_params["token"], None)  # one-shot: the view is stale now
-        log.info("manage save: %d applied, refused=%s", applied, refused)
+        log.info("manage save: %d applied, forgot=%s, refused=%s", applied, forgotten, refused)
         return JSONResponse(
-            {"ok": True, "applied": applied, "refused": refused}, headers=_MANAGE_CORS
+            {"ok": True, "applied": applied, "forgotten": forgotten, "refused": refused},
+            headers=_MANAGE_CORS,
         )
     # GET: the widget's data source -- every connector with a registered catalog,
     # each with the same catalog+modes view the gatekeeper reads. The gatekeeper
@@ -823,6 +846,9 @@ async def manage_session(request):  # type: ignore[no-untyped-def]
                 for name, info in catalog.items()
             },
             "pinned": [tool for (s, tool) in _PINNED if s == src],
+            # Epoch seconds of the last CLIENT tools/list (null = never): the panel's
+            # "last used" label. Startup re-registration deliberately doesn't count.
+            "last_seen": st.get("seen"),
         }
     return JSONResponse({"ok": True, "sources": sources}, headers=_MANAGE_CORS)
 
