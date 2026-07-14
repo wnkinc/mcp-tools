@@ -20,9 +20,14 @@ GET  /healthz                 -> {ready, provider, scanners, degraded}
   - `bedrock` (the AWS-deploy choice) — **Amazon Bedrock Guardrails**
     `ApplyGuardrail`, prompt-attack filter. Needs `BEDROCK_GUARDRAIL_ID`
     (+ `BEDROCK_GUARDRAIL_VERSION`, default `DRAFT`), `AWS_REGION`, and AWS
-    credentials (instance role on EC2). A startup warmup call validates
-    credentials, region, guardrail id, and the egress path in one shot — a
-    misconfigured screen crash-loops visibly instead of passing content.
+    credentials (instance role on EC2). Startup validates credentials, region,
+    guardrail id, and the egress path — a misconfigured screen crash-loops
+    visibly instead of passing content.
+- **Startup self-test (both providers):** before reporting healthy, the service
+  proves detection — a canonical injection must be caught (in degraded mode, the
+  hidden-ASCII payload) and a benign probe must pass. A screen that stopped
+  detecting (dep bump, filter misconfig) crash-loops instead of silently passing
+  content; tools fail closed meanwhile.
 - **AlignmentCheck (`AGENT_ALIGNMENT`)** is deferred (Together-vs-Claude decision).
 
 ## Run standalone (dev)

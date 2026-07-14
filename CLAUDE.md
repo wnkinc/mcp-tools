@@ -14,7 +14,7 @@ security/                  # shared plumbing, imported by every tool
   egress-proxy/            #   squid egress allowlist (per-tool domains, default-deny)
   ingress/                 #   tunnel creds staging (gitignored; routing lives in the overlay)
   guardrail/service/       #   output-screen sidecar; GUARDRAIL_PROVIDER=llamafirewall|bedrock
-  eval/                    #   garak red-team harness
+                           #     (proves detection at startup: broken screen = unhealthy container)
 tools/                     # one tool per dir: server.py + Dockerfile + requirements.lock
   xmcp/                    #   X API full surface (reads + OAuth1 user-context writes) (:8061)
   data/                    #   market data via OpenBB -> parquet lake (:8062)
