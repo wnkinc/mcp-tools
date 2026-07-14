@@ -1,0 +1,20 @@
+# Pinned like the other tools (see tools/xmcp/requirements.txt for why fastmcp
+# must not drift). The rest mirrors the vendored engine's [project.dependencies]
+# (workspace-mcp 1.22.0; the Dockerfile's vendor stage pins the checkout itself
+# by commit + sha256): the engine runs from source against THIS locked venv.
+fastmcp==3.4.2
+fastapi>=0.115.12
+google-api-python-client>=2.168.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.2
+httpx>=0.28.1
+urllib3>=2.7.0
+py-key-value-aio>=0.3.0
+pyjwt>=2.12.0
+python-dotenv>=1.1.0
+pyyaml>=6.0.2
+cryptography>=48.0.1
+defusedxml>=0.7.1
+pypdf>=6.13.3
+pytz>=2026.1.post1
+markdown-it-py>=3.0.0

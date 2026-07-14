@@ -1,0 +1,8 @@
+# workspace egress allowlist (squid dstdomain). One host per line; leading dot = subdomains.
+# Google Workspace APIs (Gmail/Drive/Calendar/Docs/Sheets/Slides/Chat/Forms/Tasks/
+# People/Apps Script/Custom Search all live under googleapis.com) + the OAuth hosts
+# for BOTH auth systems (our MCP auth and the engine's workspace auth).
+.googleapis.com
+accounts.google.com
+# Drive file download/export links resolve here.
+.googleusercontent.com

@@ -1,0 +1,32 @@
+{
+  "title": "Google Workspace",
+  "profile": "workspace",
+  "subdomain": "workspace",
+  "port": 8066,
+  "summary": "Google Workspace (Gmail, Drive, Calendar, Docs, Sheets, Slides, Chat, Forms, Tasks, Contacts, Search, Apps Script) acting as your Google account — 121 tools via the vendored workspace-mcp engine.",
+  "secrets": [
+    {
+      "key": "GOOGLE_OAUTH_CLIENT_ID",
+      "label": "Google OAuth client ID (workspace access)",
+      "hint": "reuse the stack's shared client — Google Cloud Console → Credentials; also add https://workspace.<your-domain>/oauth2callback to its authorized redirect URIs"
+    },
+    {
+      "key": "GOOGLE_OAUTH_CLIENT_SECRET",
+      "label": "Google OAuth client secret",
+      "hint": "same client's secret"
+    },
+    {
+      "key": "USER_GOOGLE_EMAIL",
+      "label": "Your Google account email",
+      "hint": "the single-user account the tools act as"
+    }
+  ],
+  "notes": [
+    "After deploy, the first workspace call walks you through Google consent in the browser (the engine's own OAuth flow); tokens persist in the tool's state volume.",
+    "Enable the Workspace APIs on the Google Cloud project (Gmail, Drive, Calendar, Docs, Sheets, Slides, Chat, Forms, Tasks, People, Apps Script).",
+    "Acts as YOUR Google account — gmail send, drive sharing, and appscript (code execution) included; consider gating writes in the manage panel.",
+    "Returns untrusted external content: the guardrail sidecar starts automatically with this tool.",
+    "Narrow the 121-tool surface anytime with WORKSPACE_MCP_TOOL_TIER=core (45) or extended (91) in its .env."
+  ],
+  "depends": []
+}
