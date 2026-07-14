@@ -19,6 +19,12 @@
 # Security posture is chosen by env, not code (serve() reads it at startup): this base
 # file runs auth off (local dev) but the guardrail on. The docker-compose.tunnel.yml
 # overlay is the public deploy (auth on + the Cloudflare ingress).
+#
+# No depends_on anywhere, deliberately: start order needs no constraining because
+# every dependency self-heals -- screening fails closed until the guardrail is
+# healthy, sidecar registration lands on the next ~30s probe, and
+# restart: unless-stopped retries anything that lost a race. A cold start may be
+# scruffy for a minute; it cannot be wrong.
 # =================================================================================
 services:
   # Egress wall: each tool sits on the `internal` network (no gateway to the internet);
@@ -79,9 +85,6 @@ services:
       - guardrail-hf-cache:/app/.cache/huggingface   # persist the model cache across restarts
     networks:
       - internal   # egress only via the wall (listener 3133, allowlist/guardrail.txt)
-    depends_on:
-      egress:
-        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8071/healthz',timeout=3)"]
       interval: 30s
@@ -124,9 +127,6 @@ services:
       - ./deploy/host/control:/app/control
     networks:
       - internal
-    depends_on:
-      egress:
-        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8072/healthz',timeout=3)"]
       interval: 30s
@@ -172,14 +172,6 @@ services:
       - xmcp-state:/app/state   # writable state (OAuth registrations + tokens when auth is on)
     networks:
       - internal
-    depends_on:
-      guardrail:
-        condition: service_healthy   # wait for the screener before starting
-        required: false              # profile-gated: absent guardrail = start anyway
-      approval:
-        condition: service_started
-      egress:
-        condition: service_started
 
   # Trusted tools: same shape, no guardrail leg. Each points at its OWN egress listener,
   # so it can only reach its own allowlist. Posture is local dev here; the overlay flips it.
@@ -212,9 +204,6 @@ services:
       - lean-data:/lean-data
     networks:
       - internal
-    depends_on:
-      egress:
-        condition: service_started
 
   lean:
     build:
@@ -247,9 +236,6 @@ services:
       - lean-data:/lean-data
     networks:
       - internal
-    depends_on:
-      egress:
-        condition: service_started
 
   # Untrusted-output tool like xmcp: Telegram message content is a prompt-injection
   # vector, so results screen through the guardrail. Its stdio child (the vendored
@@ -285,14 +271,6 @@ services:
       - telegram-state:/app/state
     networks:
       - internal
-    depends_on:
-      guardrail:
-        condition: service_healthy   # wait for the screener before starting
-        required: false              # profile-gated: absent guardrail = start anyway
-      approval:
-        condition: service_started
-      egress:
-        condition: service_started
 
   # No profile: the gatekeeper is control-plane substrate (like the approval sidecar)
   # and always runs. "Using" it is simply attaching its connector in claude.ai.
@@ -318,11 +296,6 @@ services:
       - gatekeeper-state:/app/state
     networks:
       - internal
-    depends_on:
-      approval:
-        condition: service_started
-      egress:
-        condition: service_started
 
   # This tool screens its output through the guardrail (untrusted external content:
   # mail bodies, docs, comments) and acts as YOUR Google account.
@@ -352,14 +325,6 @@ services:
       - workspace-state:/app/state
     networks:
       - internal
-    depends_on:
-      guardrail:
-        condition: service_healthy   # wait for the screener before starting
-        required: false              # profile-gated: absent guardrail = start anyway
-      approval:
-        condition: service_started
-      egress:
-        condition: service_started
 
 networks:
   # No gateway to the host/internet: containers here reach only each other + any peer

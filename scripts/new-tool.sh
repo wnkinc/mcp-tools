@@ -146,9 +146,6 @@ service = f"""  {name}:
       - {name}-state:/app/state
     networks:
       - internal
-    depends_on:
-      egress:
-        condition: service_started
 
 """
 if "\nnetworks:\n" not in src or "\nvolumes:\n" not in src:

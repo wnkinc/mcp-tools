@@ -60,7 +60,7 @@ Built + run by the stack as the `guardrail` service (profile `guardrail`, on by
 default in `env.example`), reached by tools at `http://guardrail:8071`. The tool
 middleware **fails closed**, so if this sidecar is down the tool's results are
 withheld — compose keeps it up (`restart: unless-stopped` + a `/healthz`
-healthcheck the untrusted tools wait on).
+healthcheck).
 
 The sidecar's egress goes through the wall on its own listener
 (`egress:3133`, allowlist `security/egress-proxy/allowlist/guardrail.txt`):
