@@ -173,9 +173,7 @@ def data_catalog(asset: str = "") -> str:
     entries = lake.catalog(asset) if asset else lake.catalog()
     if not entries:
         where = f" under {asset!r}" if asset else ""
-        return (
-            f"The lake is empty{where} — nothing ingested yet. Ingest with equity/crypto/fx-ingest."
-        )
+        return f"The lake is empty{where} — nothing ingested yet. Ingest with crypto-ingest."
     scope = f"{asset!r} datasets" if asset else "all stored datasets"
     return _fmt_catalog(entries, f"Lake — {scope} ({len(entries)}):")
 
