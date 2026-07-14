@@ -54,32 +54,33 @@ backend** — the AWS stack reads the ingress stack via a StackReference.
 Ask the user, in a single round, the decisions `docs/DEPLOY.md` lists:
 
 1. **Path** — local box or AWS.
-2. **Tools** — xmcp, data, lean, telegram (lean requires data and, on AWS,
-   a bigger disk — check the runbook's sizing note).
-3. **Guardrail** — default to the path's natural provider (llamafirewall
-   local, bedrock on AWS). Only surface this if they ask or pick tools that
-   don't need it.
-4. **Approvals** — only if the picked tools include a gated one (xmcp,
-   telegram). Frame it as the server-side version of Claude's per-tool
-   "always allow / needs approval / blocked" — enforced here because the
-   desktop toggle is sticky (approve once and it sticks across every chat)
-   and doesn't reliably apply to custom connectors. Its purpose: keep
-   dangerous tool calls behind a human tap. Present the three postures and
-   let them pick:
-   - **Needs approval** (the default worth steering to): a gated write call
-     posts an Approve/Deny card to an approval channel and reports pending
-     in chat until they tap it. They choose the provider — Slack, Discord,
-     or Telegram (`APPROVAL_PROVIDER`) — a free app, ~5-10 browser minutes,
-     done while other steps run. A channel MUST be configured or every gated
-     call fails "approval undeliverable"; there is no silent fallback.
-   - **Always allow**: `MCP_REQUIRE_APPROVAL=0` in the root `.env`. Say
-     plainly that write actions on those tools then run ungated.
-   - **Blocked**: just don't deploy that tool.
-   Whichever provider they pick for needs-approval, explain the control is
-   HUMAN-in-the-loop, so it must live on a platform (or at least an account)
-   the agent does not operate — if the agent's own tools can read the card
-   and press its buttons, the gate approves itself. Steer them to whichever
-   of Slack/Discord/Telegram their agent doesn't touch (most sharply: don't
+2. **Tools** — the shipped set is the README's "The tools" table (source of
+   truth: `tools/*/deploy.json` manifests — summary, secrets, notes like
+   image size). Mind the manifests' sizing/dependency notes when they pick.
+3. **Guardrail** — a decision only on the LOCAL path: llamafirewall (local
+   model, the default — needs a free HF token + model-access grant) or
+   unscreened (`GUARDRAIL_ENABLED=0`, say plainly what that means). The AWS
+   path always provisions Bedrock; nothing to ask. Only surface this if they
+   ask or their tool picks include an untrusted-output one.
+4. **Approval channel** — the approval layer is on by default: the
+   server-side version of Claude's per-tool "always allow / needs approval /
+   blocked", enforced here because the desktop toggle is sticky (approve
+   once and it sticks across every chat) and doesn't reliably apply to
+   custom connectors. Every tool STARTS `always_allow`; the user gates or
+   blocks individual tools at runtime via the gatekeeper's panel or
+   `set_gating` (docs/GATEKEEPER.md) — that is not a deploy-time decision.
+   The deploy-time decision is the CHANNEL that will deliver Approve/Deny
+   cards for whatever they later gate (and for the two code-pinned
+   gatekeeper tools): Slack, Discord, or Telegram (`APPROVAL_PROVIDER`) — a
+   free app, ~5-10 browser minutes, done while other steps run. Without a
+   channel, gated calls report the approval as undeliverable (never silently
+   run). `MCP_REQUIRE_APPROVAL=0` in the root `.env` removes the layer
+   entirely — say plainly what that means.
+   Whichever provider they pick, explain the control is HUMAN-in-the-loop,
+   so it must live on a platform (or at least an account) the agent does not
+   operate — if the agent's own tools can read the card and press its
+   buttons, the gate approves itself. Steer them to whichever of
+   Slack/Discord/Telegram their agent doesn't touch (most sharply: don't
    run the Telegram provider in a chat the telegram tool's account can see).
 
 ## Phase 1 — preflight
@@ -159,7 +160,7 @@ the runbook, and get an explicit yes. The Cloudflare ingress stack and
   assuming it worked.
 - Per-tool secrets step: read `tools/<tool>/env.example` for each chosen
   tool and collect only those values, following the secrets protocol above.
-- Approval-channel step (gated tools + "needs approval" chosen in Phase 0):
+- Approval-channel step (unless they opted the layer off in Phase 0):
   drive the runbook's Approvals section. All three walkthroughs live in
   `security/approval/service/env.example`:
   - Slack — create app → `chat:write` scope → install → signing secret →
@@ -181,9 +182,8 @@ the runbook, and get an explicit yes. The Cloudflare ingress stack and
   (compose-internal, e.g. `docker compose exec approval python -c ...`) must
   show `"channel": "configured"`, and a test POST to its `/gate` must return
   `"notified": true` — that proves a card actually landed in their channel;
-  have the user Deny it. If they chose "always allow" instead, set
-  `MCP_REQUIRE_APPROVAL=0` in the root `.env` before `up`; "blocked" just means
-  the tool isn't in the deploy.
+  have the user Deny it. If they opted the layer off instead, set
+  `MCP_REQUIRE_APPROVAL=0` in the root `.env` before `up`.
 
 ## Finish
 
