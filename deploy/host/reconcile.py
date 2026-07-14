@@ -88,12 +88,9 @@ def load_manifests(repo: Path) -> dict[str, dict]:
     return manifests
 
 
-def env_values(env_path: Path) -> dict[str, str]:
-    """Naive KEY=value parse of a tool .env -- enough to check staging."""
+def env_values_from_text(text: str) -> dict[str, str]:
     values = {}
-    if not env_path.exists():
-        return values
-    for line in env_path.read_text().splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, _, val = line.partition("=")
@@ -101,11 +98,78 @@ def env_values(env_path: Path) -> dict[str, str]:
     return values
 
 
+def env_values(env_path: Path) -> dict[str, str]:
+    """Naive KEY=value parse of a tool .env -- enough to check staging."""
+    if not env_path.exists():
+        return {}
+    return env_values_from_text(env_path.read_text())
+
+
+def shared_identity_values(repo: Path, exclude_tool: str) -> dict[str, str]:
+    """The deployment-wide values (MCP-auth identity) from the first sibling tool
+    .env that carries them all -- the source both kinds of seeding draw from."""
+    for sibling in sorted((repo / "tools").glob("*/.env")):
+        if sibling.parent.name == exclude_tool:
+            continue
+        values = env_values(sibling)
+        if all(values.get(k) for k in SHARED_IDENTITY_KEYS):
+            return values
+    return {}
+
+
+def resolve_default(secret: dict, shared: dict) -> str:
+    """A manifest secret's default_from value, adapted where shapes differ
+    (an email allowlist is a comma list; a single-user email is its first entry)."""
+    source = secret.get("default_from", "")
+    value = shared.get(source, "")
+    if source == "MCP_ALLOWED_GOOGLE_EMAILS" and value:
+        value = value.split(",")[0].strip()
+    return value
+
+
 def secrets_state(repo: Path, manifest: dict) -> tuple[bool, list[str]]:
-    """(ready, missing_keys): every manifest secret has a non-empty value staged."""
+    """(ready, missing_keys): every manifest secret has a non-empty value staged
+    OR a resolvable default (default_from a deployment-wide value) -- those are
+    filled at deploy time, so the user is never asked for what the stack knows."""
     values = env_values(repo / "tools" / manifest["profile"] / ".env")
-    missing = [s["key"] for s in manifest.get("secrets", []) if not values.get(s["key"])]
+    shared = shared_identity_values(repo, manifest["profile"])
+    missing = [
+        s["key"]
+        for s in manifest.get("secrets", [])
+        if not values.get(s["key"]) and not resolve_default(s, shared)
+    ]
     return (not missing, missing)
+
+
+def materialize_env(repo: Path, tool: str, manifest: dict) -> None:
+    """Ensure tools/<tool>/.env exists and carries everything not user-supplied:
+    the template, the shared MCP-auth identity, and manifest default_from fills."""
+    env_path = repo / "tools" / tool / ".env"
+    if not env_path.exists():
+        template = repo / "tools" / tool / "env.example"
+        env_path.write_text(template.read_text() if template.exists() else "")
+        os.chmod(env_path, 0o600)
+    text = seed_shared_identity(repo, tool, env_path.read_text())
+    have = env_values_from_text(text)
+    shared = shared_identity_values(repo, tool)
+    filled = []
+    for secret in manifest.get("secrets", []):
+        key = secret["key"]
+        if have.get(key):
+            continue
+        value = resolve_default(secret, shared)
+        if not value:
+            continue
+        pattern = re.compile(rf"^#?\s*{re.escape(key)}=.*$", re.MULTILINE)
+        if pattern.search(text):
+            text = pattern.sub(lambda _m, k=key, v=value: f"{k}={v}", text, count=1)
+        else:
+            text = text.rstrip("\n") + f"\n{key}={value}\n"
+        filled.append(key)
+    env_path.write_text(text)
+    os.chmod(env_path, 0o600)
+    if filled:
+        log(f"defaulted {', '.join(filled)} in tools/{tool}/.env from the shared identity")
 
 
 def compose_cmd(repo: Path) -> list[str]:
@@ -177,6 +241,9 @@ def process_request(repo: Path, req: dict, manifests: dict) -> dict:
     ready, missing = secrets_state(repo, manifests[tool])
     if not ready:
         return fail(f"secrets not staged for {tool}: missing {', '.join(missing)}")
+    # Fill defaults (shared identity + manifest default_from) so a tool whose every
+    # secret is deployment-derivable deploys with no staging step at all.
+    materialize_env(repo, tool, manifests[tool])
 
     write_json(
         control_dir(repo) / "status.json",
@@ -204,8 +271,91 @@ def process_request(repo: Path, req: dict, manifests: dict) -> dict:
     if result.returncode != 0:
         tail = (result.stderr or result.stdout).strip()[-500:]
         return fail(f"compose up exited {result.returncode}: {tail}")
+    # `up -d` exiting 0 only means the container was CREATED -- a crash-looping tool
+    # would otherwise report "done". Wait for its healthcheck (all tools probe
+    # serve()'s /healthz) before believing it.
+    err = wait_healthy(repo, tool)
+    if err:
+        return fail(err)
     log(f"deploy {tool}: done")
-    return {**status, "phase": "done", "detail": f"{tool} is up", "updated": time.time()}
+    return {
+        **status,
+        "phase": "done",
+        "detail": f"{tool} is up and healthy",
+        "updated": time.time(),
+    }
+
+
+HEALTHY_TIMEOUT = 180  # image start + first healthcheck window
+
+
+def wait_healthy(repo: Path, tool: str, timeout: float | None = None) -> str | None:
+    """None when the service reaches running+healthy; else a failure detail with logs."""
+    timeout = HEALTHY_TIMEOUT if timeout is None else timeout
+    deadline = time.time() + timeout
+    last = "no status"
+    while time.time() < deadline:
+        try:
+            # S603: fixed argv; `tool` was validated against the shipped manifests.
+            out = subprocess.run(  # noqa: S603
+                compose_cmd(repo) + ["ps", "--format", "json", tool],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=repo,
+            ).stdout.strip()
+            rec = json.loads(out.splitlines()[0]) if out else {}
+            state, health = rec.get("State", ""), rec.get("Health", "")
+            last = f"state={state or '?'} health={health or 'none'}"
+            if state == "running" and health in ("healthy", ""):
+                return None
+        except (subprocess.SubprocessError, OSError, ValueError):
+            pass
+        time.sleep(min(5, max(0.05, timeout / 10)))
+    # S603: fixed argv, validated tool name.
+    logs = subprocess.run(  # noqa: S603
+        compose_cmd(repo) + ["logs", "--tail", "12", tool],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=repo,
+    ).stdout.strip()[-600:]
+    return f"{tool} did not become healthy within {int(timeout)}s ({last}). Logs: {logs}"
+
+
+# Every tool carries the same MCP-auth identity (the shared Google client that
+# gates who may CONNECT Claude, and the operator's email allowlist) -- it is not a
+# per-tool secret, so the staging form doesn't ask for it. Seed it from another
+# tool's .env so a freshly staged tool can actually start (serve() fails closed
+# without the allowlist).
+SHARED_IDENTITY_KEYS = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "MCP_ALLOWED_GOOGLE_EMAILS")
+
+
+def seed_shared_identity(repo: Path, tool: str, text: str) -> str:
+    """Fill empty shared-identity keys from the first sibling .env that has them all."""
+    have = env_values_from_text(text)
+    missing = [k for k in SHARED_IDENTITY_KEYS if not have.get(k)]
+    if not missing:
+        return text
+    for sibling in sorted((repo / "tools").glob("*/.env")):
+        if sibling.parent.name == tool:
+            continue
+        values = env_values(sibling)
+        if all(values.get(k) for k in SHARED_IDENTITY_KEYS):
+            for key in missing:
+                pattern = re.compile(rf"^#?\s*{re.escape(key)}=.*$", re.MULTILINE)
+                if pattern.search(text):
+                    text = pattern.sub(lambda _m, k=key, v=values[key]: f"{k}={v}", text, count=1)
+                else:
+                    text = text.rstrip("\n") + f"\n{key}={values[key]}\n"
+            log(
+                f"seeded shared MCP-auth identity into tools/{tool}/.env (from {sibling.parent.name})"
+            )
+            return text
+    log(
+        f"WARNING: no sibling .env carries the shared identity; tools/{tool}/.env is missing {missing}"
+    )
+    return text
 
 
 def apply_staging(repo: Path, manifests: dict) -> None:
@@ -238,6 +388,9 @@ def apply_staging(repo: Path, manifests: dict) -> None:
             text = text.rstrip("\n") + f"\n{key}={value}\n"
     env_path.write_text(text)
     os.chmod(env_path, 0o600)
+    # User values are in; now fill everything the deployment already knows
+    # (shared identity + manifest default_from) around them.
+    materialize_env(repo, tool, manifest)
     write_json(path, {})  # consumed: values no longer at rest in the control dir
     log(f"staged {len(values)} secret value(s) into tools/{tool}/.env")
 

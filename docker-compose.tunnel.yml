@@ -65,6 +65,17 @@ services:
   # The gatekeeper flips other tools' approval requirement. set_gating is ALWAYS gated
   # (the in-chat widget is its own approval channel, so it needs no Slack/Discord/etc),
   # and it shows the card via SPIKE_APPROVAL_WIDGET -> APPROVAL_PUBLIC_URL.
+  # Workspace acts as YOUR Google account and returns untrusted external content;
+  # the engine's OAuth redirect must match the public URL exactly.
+  workspace:
+    environment:
+      MCP_AUTH_ENABLED: "1"
+      MCP_REQUIRE_APPROVAL: ${MCP_REQUIRE_APPROVAL:-1}
+      MCP_UNTRUSTED_OUTPUT: "1"
+      MCP_PUBLIC_URL: https://workspace.${MCP_DOMAIN}
+      WORKSPACE_EXTERNAL_URL: https://workspace.${MCP_DOMAIN}
+      GOOGLE_OAUTH_REDIRECT_URI: https://workspace.${MCP_DOMAIN}/oauth2callback
+
   gatekeeper:
     environment:
       MCP_AUTH_ENABLED: "1"
@@ -99,6 +110,8 @@ configs:
           service: http://telegram:8063
         - hostname: gatekeeper.${MCP_DOMAIN}
           service: http://gatekeeper:8065
+        - hostname: workspace.${MCP_DOMAIN}
+          service: http://workspace:8066
         # The approval sidecar goes public ONLY on its human-facing paths: the
         # capability-token pages (approve, the manage widget's session, the secrets
         # form's session -- tokens are the credential) and the

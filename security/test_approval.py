@@ -1057,7 +1057,8 @@ def test_deploy_status_formats_reconciler_state():
     assert "secrets staged: staged ✓" in out  # data, ready
     assert "missing: X_OAUTH_CONSUMER_KEY" in out  # xmcp, not ready
     assert "Last deploy operation: lean -> done" in out
-    assert "call deploy_tool" in out  # the live-reconciler path
+    assert "deploy_tool(<name>)" in out  # the live-reconciler path, step-ordered
+    assert "prerequisites" in out  # step (1): the tool's browser steps lead
     assert "reconciler is not running" not in out
 
 

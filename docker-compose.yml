@@ -51,7 +51,7 @@ services:
         # skips the local-model stack (torch/CUDA, multi-GB) entirely.
         GUARDRAIL_PROVIDER: ${GUARDRAIL_PROVIDER:-llamafirewall}
     image: mcp-guardrail
-    profiles: ["xmcp", "telegram"]   # auto: starts with any untrusted-output tool
+    profiles: ["xmcp", "telegram", "workspace"]   # auto: starts with any untrusted-output tool
     restart: unless-stopped
     # No published port -- a true sidecar, reached over the network as http://guardrail:8071.
     environment:
@@ -325,6 +325,38 @@ services:
       egress:
         condition: service_started
 
+  # This tool screens its output through the guardrail (untrusted external content:
+  # mail bodies, docs, comments) and acts as YOUR Google account.
+  workspace:
+    build:
+      context: .
+      dockerfile: tools/workspace/Dockerfile
+    image: mcp-workspace
+    profiles: ["workspace"]   # opt-in: runs only when listed in COMPOSE_PROFILES (root .env)
+    restart: unless-stopped
+    env_file:
+      - path: tools/workspace/.env
+        required: false
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_TRANSPORT: http
+      MCP_AUTH_ENABLED: "0"
+      MCP_REQUIRE_APPROVAL: "0"
+      MCP_UNTRUSTED_OUTPUT: "1"
+      GUARDRAIL_URL: http://guardrail:8071
+      GUARDRAIL_ENABLED: ${GUARDRAIL_ENABLED:-1}
+      APPROVAL_URL: http://approval:8072
+      HTTPS_PROXY: http://egress:3135
+      HTTP_PROXY: http://egress:3135
+      NO_PROXY: guardrail,approval,localhost,127.0.0.1
+    volumes:
+      - workspace-state:/app/state
+    networks:
+      - internal
+    depends_on:
+      egress:
+        condition: service_started
+
 networks:
   # No gateway to the host/internet: containers here reach only each other + any peer
   # that also has an `edge` leg (the egress proxy). This is the wall.
@@ -333,6 +365,7 @@ networks:
   edge: {}
 
 volumes:
+  workspace-state:
   approval-state:
   gatekeeper-state:
   telegram-state:

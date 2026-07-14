@@ -71,10 +71,18 @@ def register_secrets_widget(mcp, load_manifests) -> None:  # type: ignore[no-unt
                 "unavailable. Nothing was changed."
             )
         marker = json.dumps({"token": token, "tool": name})
+        prereqs = manifest.get("prerequisites", [])
+        prereq_note = (
+            "REMIND the user of this tool's prerequisites (browser steps) if not "
+            "already done: " + " | ".join(prereqs) + "\n"
+            if prereqs
+            else ""
+        )
         return (
             f"A secrets form for `{name}` is shown in the chat ({len(fields)} "
             "field(s)). The user fills it and clicks Save; the values go directly "
             "to the server and are never visible here. When they say it's saved, "
             "check deploy_status -- staging shows within ~15 seconds.\n"
+            f"{prereq_note}"
             f"<!--SECRETS {marker}-->"
         )

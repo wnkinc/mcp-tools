@@ -113,6 +113,10 @@ def format_deploy_status(
         for profile in undeployed:
             m = manifests[profile]
             lines.append(f"  - {profile}: {m['summary']}")
+            # Prerequisites FIRST: human browser steps (console config, API
+            # enablement) that must happen before secrets or deploys make sense.
+            for i, step in enumerate(m.get("prerequisites", []), 1):
+                lines.append(f"      before anything, step {i}: {step}")
             inv = inventory.get(profile)
             if m.get("secrets"):
                 needs = "; ".join(f"{s['label']} ({s['hint']})" for s in m["secrets"])
@@ -148,13 +152,14 @@ def format_deploy_status(
                 )
             if undeployed:
                 lines.append(
-                    "To deploy: stage the tool's secrets -- stage_secrets(<name>) opens an "
-                    "in-chat form (values go directly to the server, never through chat), "
-                    "or fill tools/<name>/.env on the host -- make sure "
-                    "https://<subdomain>.<your-domain>/auth/callback is on the shared Google "
-                    "OAuth client, then call deploy_tool(<name>) -- it needs the user's "
-                    "approval, applies via the host reconciler, and finishes with adding "
-                    "the connector in claude.ai."
+                    "To deploy, in order: (1) the tool's prerequisites above, if any "
+                    "(browser steps the user does; every tool also needs "
+                    "https://<subdomain>.<your-domain>/auth/callback on the shared Google "
+                    "OAuth client for connecting Claude); (2) stage its secrets -- "
+                    "stage_secrets(<name>) opens an in-chat form (values go directly to "
+                    "the server, never through chat), or fill tools/<name>/.env on the "
+                    "host; (3) deploy_tool(<name>) -- needs the user's approval, applies "
+                    "via the host reconciler; (4) add the connector in claude.ai."
                 )
     elif undeployed:
         lines.append(
@@ -184,7 +189,10 @@ async def deploy_status() -> str:
 @mcp.tool
 async def deploy_tool(name: str) -> str:
     """Deploy an available, not-yet-deployed tool from the codebase (one at a
-    time). Requires the
+    time). IMPORTANT: if the tool lists prerequisites (deploy_status shows them --
+    browser steps like OAuth redirect URIs or enabling APIs), CONFIRM with the
+    user that they are done BEFORE calling this: the deploy itself succeeds
+    without them, but the tool then fails at first use. Requires the
     user's approval, then the host reconciler applies it: profile added, image
     built, container up -- progress and results via deploy_status. Prerequisite:
     the tool's secrets staged on the host (deploy_status shows staged/missing).
@@ -231,10 +239,18 @@ async def deploy_tool(name: str) -> str:
             f"⚠️ Deploy request refused: {data.get('error', 'unknown error')}. Nothing was changed."
         )
     notes = "; ".join(manifests[name].get("notes", [])[:2])
+    prereqs = manifests[name].get("prerequisites", [])
+    prereq_note = (
+        " REMIND the user of this tool's browser prerequisites if not already "
+        "done (the tool fails at first use without them): " + " | ".join(prereqs)
+        if prereqs
+        else ""
+    )
     return (
         f"🚀 Deploy of `{name}` requested (id {data['id']}) -- the host reconciler is "
         f"applying it now. Track progress with deploy_status."
         + (f" Notes: {notes}" if notes else "")
+        + prereq_note
         + " When it's up, add the connector in claude.ai "
         f"(https://{manifests[name]['subdomain']}.<your-domain>/mcp)."
     )

@@ -44,6 +44,8 @@ jobs:
             python: "3.11" # the engine image's interpreter, which this lock targets
           - tests: tools/telegram
             lock: tools/telegram/requirements.lock
+          - tests: tools/workspace
+            lock: tools/workspace/requirements.lock
           # security/ has no lock of its own; xmcp is the max-posture tool, so its
           # lock covers every shared layer (auth + approval + guardrail).
           - tests: security

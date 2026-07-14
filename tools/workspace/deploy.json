@@ -1,0 +1,38 @@
+{
+  "title": "Google Workspace",
+  "profile": "workspace",
+  "subdomain": "workspace",
+  "port": 8066,
+  "summary": "Google Workspace (Gmail, Drive, Calendar, Docs, Sheets, Slides, Chat, Forms, Tasks, Contacts, Search, Apps Script) acting as your Google account — 121 tools via the vendored workspace-mcp engine.",
+  "secrets": [
+    {
+      "key": "GOOGLE_OAUTH_CLIENT_ID",
+      "label": "Google OAuth client ID (workspace access)",
+      "hint": "leave blank to reuse the deployment's shared Google client (recommended); make sure it has the /oauth2callback redirect URI",
+      "default_from": "GOOGLE_CLIENT_ID"
+    },
+    {
+      "key": "GOOGLE_OAUTH_CLIENT_SECRET",
+      "label": "Google OAuth client secret",
+      "hint": "leave blank to reuse the shared client's secret",
+      "default_from": "GOOGLE_CLIENT_SECRET"
+    },
+    {
+      "key": "USER_GOOGLE_EMAIL",
+      "label": "Your Google account email",
+      "hint": "leave blank to use the deployment's allowlisted email",
+      "default_from": "MCP_ALLOWED_GOOGLE_EMAILS"
+    }
+  ],
+  "prerequisites": [
+    "On the Google Cloud project's shared OAuth client (Console → APIs & Services → Credentials), add BOTH authorized redirect URIs: https://workspace.<your-domain>/oauth2callback (the engine's workspace consent) and https://workspace.<your-domain>/auth/callback (connecting Claude).",
+    "Enable the Workspace APIs on that project (Console → APIs & Services → Library): Gmail, Drive, Calendar, Docs, Sheets, Slides, Chat, Forms, Tasks, People, Apps Script."
+  ],
+  "notes": [
+    "After deploy, the first workspace call walks you through Google consent in the browser (the engine's own OAuth flow); tokens persist in the tool's state volume.",
+    "Acts as YOUR Google account — gmail send, drive sharing, and appscript (code execution) included; consider gating writes in the manage panel.",
+    "Returns untrusted external content: the guardrail sidecar starts automatically with this tool.",
+    "Narrow the 121-tool surface anytime with WORKSPACE_MCP_TOOL_TIER=core (45) or extended (91) in its .env."
+  ],
+  "depends": []
+}
