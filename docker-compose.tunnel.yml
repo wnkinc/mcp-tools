@@ -64,7 +64,7 @@ services:
 
   # The gatekeeper flips other tools' approval requirement. set_gating is ALWAYS gated
   # (the in-chat widget is its own approval channel, so it needs no Slack/Discord/etc),
-  # and it shows the card via SPIKE_APPROVAL_WIDGET -> APPROVAL_PUBLIC_URL.
+  # and it shows the card via APPROVAL_WIDGET -> APPROVAL_PUBLIC_URL.
   # Workspace acts as YOUR Google account and returns untrusted external content;
   # the engine's OAuth redirect must match the public URL exactly.
   workspace:
@@ -80,7 +80,7 @@ services:
     environment:
       MCP_AUTH_ENABLED: "1"
       MCP_REQUIRE_APPROVAL: "1"
-      SPIKE_APPROVAL_WIDGET: "1"
+      APPROVAL_WIDGET: "1"
       APPROVAL_PUBLIC_URL: https://approval.${MCP_DOMAIN}
       MCP_PUBLIC_URL: https://gatekeeper.${MCP_DOMAIN}
 

@@ -120,24 +120,21 @@ def serve(
     untrusted_output = _env_override("MCP_UNTRUSTED_OUTPUT", untrusted_output)
     stateless_http = _env_override("MCP_STATELESS_HTTP", stateless_http)
 
-    # SPIKE (throwaway, SPIKE_APPROVAL_WIDGET=1): register the in-chat approval-widget
-    # probe. Runs BEFORE the middleware blocks so it can extend the guardrail exempt
-    # allowlist its helper tool relies on (MCP_GUARDRAIL_EXEMPT).
-    if _is_truthy(os.getenv("SPIKE_APPROVAL_WIDGET")):
-        from security.approval.widget_spike import register_widget_spike
+    # The in-chat approval card (opt-in per tool, APPROVAL_WIDGET=1): tags gated
+    # tools so their pending status renders an Approve/Deny widget in the chat.
+    # SPIKE_APPROVAL_WIDGET is the flag's pre-promotion name, honored for deploys
+    # whose .env still carries it.
+    approval_widget = _is_truthy(os.getenv("APPROVAL_WIDGET") or os.getenv("SPIKE_APPROVAL_WIDGET"))
+    if approval_widget:
+        from security.approval.approve_widget import register_approve_widget
 
-        register_widget_spike(mcp)
+        register_approve_widget(mcp)
 
     if require_approval:
         # State + the human-facing pages live in the approval sidecar (APPROVAL_URL) --
         # including every tool's mode; this middleware is only the per-tool client
         # (source scopes its approvals and its catalog registration).
-        mcp.add_middleware(
-            ApprovalMiddleware(
-                source=source,
-                widget=_is_truthy(os.getenv("SPIKE_APPROVAL_WIDGET")),
-            )
-        )
+        mcp.add_middleware(ApprovalMiddleware(source=source, widget=approval_widget))
         # Pre-declare the approval protocol in the server-level instructions (a
         # list-time, trusted channel) so a pending status arrives as expected
         # behavior. Runtime tool output that explains itself reads as prompt
