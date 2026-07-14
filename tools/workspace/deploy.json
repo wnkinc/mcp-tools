@@ -21,9 +21,12 @@
       "hint": "the single-user account the tools act as"
     }
   ],
+  "prerequisites": [
+    "On the Google Cloud project's shared OAuth client (Console → APIs & Services → Credentials), add BOTH authorized redirect URIs: https://workspace.<your-domain>/oauth2callback (the engine's workspace consent) and https://workspace.<your-domain>/auth/callback (connecting Claude).",
+    "Enable the Workspace APIs on that project (Console → APIs & Services → Library): Gmail, Drive, Calendar, Docs, Sheets, Slides, Chat, Forms, Tasks, People, Apps Script."
+  ],
   "notes": [
     "After deploy, the first workspace call walks you through Google consent in the browser (the engine's own OAuth flow); tokens persist in the tool's state volume.",
-    "Enable the Workspace APIs on the Google Cloud project (Gmail, Drive, Calendar, Docs, Sheets, Slides, Chat, Forms, Tasks, People, Apps Script).",
     "Acts as YOUR Google account — gmail send, drive sharing, and appscript (code execution) included; consider gating writes in the manage panel.",
     "Returns untrusted external content: the guardrail sidecar starts automatically with this tool.",
     "Narrow the 121-tool surface anytime with WORKSPACE_MCP_TOOL_TIER=core (45) or extended (91) in its .env."

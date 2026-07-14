@@ -98,6 +98,7 @@ cat > "$DIR/deploy.json" <<JSON
   "secrets": [
     {"key": "TODO_API_KEY", "label": "TODO human name", "hint": "TODO where to get it"}
   ],
+  "prerequisites": [],
   "notes": [],
   "depends": []
 }

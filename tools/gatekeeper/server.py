@@ -113,6 +113,10 @@ def format_deploy_status(
         for profile in undeployed:
             m = manifests[profile]
             lines.append(f"  - {profile}: {m['summary']}")
+            # Prerequisites FIRST: human browser steps (console config, API
+            # enablement) that must happen before secrets or deploys make sense.
+            for i, step in enumerate(m.get("prerequisites", []), 1):
+                lines.append(f"      before anything, step {i}: {step}")
             inv = inventory.get(profile)
             if m.get("secrets"):
                 needs = "; ".join(f"{s['label']} ({s['hint']})" for s in m["secrets"])
@@ -148,13 +152,14 @@ def format_deploy_status(
                 )
             if undeployed:
                 lines.append(
-                    "To deploy: stage the tool's secrets -- stage_secrets(<name>) opens an "
-                    "in-chat form (values go directly to the server, never through chat), "
-                    "or fill tools/<name>/.env on the host -- make sure "
-                    "https://<subdomain>.<your-domain>/auth/callback is on the shared Google "
-                    "OAuth client, then call deploy_tool(<name>) -- it needs the user's "
-                    "approval, applies via the host reconciler, and finishes with adding "
-                    "the connector in claude.ai."
+                    "To deploy, in order: (1) the tool's prerequisites above, if any "
+                    "(browser steps the user does; every tool also needs "
+                    "https://<subdomain>.<your-domain>/auth/callback on the shared Google "
+                    "OAuth client for connecting Claude); (2) stage its secrets -- "
+                    "stage_secrets(<name>) opens an in-chat form (values go directly to "
+                    "the server, never through chat), or fill tools/<name>/.env on the "
+                    "host; (3) deploy_tool(<name>) -- needs the user's approval, applies "
+                    "via the host reconciler; (4) add the connector in claude.ai."
                 )
     elif undeployed:
         lines.append(

@@ -29,5 +29,7 @@ def test_manifest_shape(path):
     assert isinstance(m["port"], int)
     for secret in m["secrets"]:
         assert set(secret) >= {"key", "label", "hint"}, f"{path}: bad secret entry {secret}"
+    for step in m.get("prerequisites", []):
+        assert isinstance(step, str) and step, f"{path}: bad prerequisite {step!r}"
     for dep in m["depends"]:
         assert (TOOLS / dep / "deploy.json").exists(), f"{path}: unknown dependency {dep}"
