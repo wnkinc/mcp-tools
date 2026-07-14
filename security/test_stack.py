@@ -148,6 +148,18 @@ def test_approval_sidecar_wiring(name):
     )
 
 
+def test_env_example_available_list_matches_manifests():
+    """env.example's 'Available:' line is the one hand-maintained tool list kept
+    on purpose (deployers edit that file with no README at hand) -- so it must
+    equal the manifest set exactly."""
+    m = re.search(r"Available: ([a-z0-9, -]+)\.", (ROOT / "env.example").read_text())
+    assert m, "env.example lost its 'Available: <tools>.' line"
+    listed = {t.strip() for t in m.group(1).split(",")}
+    assert listed == set(TOOLS), (
+        f"env.example 'Available:' list {sorted(listed)} != shipped tools {TOOLS}"
+    )
+
+
 def test_ci_and_dependabot_cover_every_tool():
     """A tool outside the pytest matrix ships untested; one outside dependabot's
     pip directories gets no security-update PRs for its lock. Both gaps happened

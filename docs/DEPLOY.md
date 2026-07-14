@@ -18,11 +18,12 @@ while keeping its domain, tunnel, and credentials.
 
 ## Decisions to make first (both paths)
 
-1. **Which tools** — each is a compose profile: `xmcp`, `data`, `lean`,
-   `telegram`. Start small; adding a tool later is an `.env` edit + `up`.
-   (`lean` needs `data`, and its 13 GB base image wants a bigger disk.)
-2. **Guardrail on or off** — the output screen for the untrusted tools (`xmcp`,
-   `telegram`). Each path picks its natural provider (table above). On the AWS
+1. **Which tools** — each is a compose profile named after itself; the README's
+   ["The tools" table](../README.md#the-tools) is the menu (each tool's
+   `deploy.json` manifest carries its sizing/dependency notes). Start small;
+   adding a tool later is an `.env` edit + `up`.
+2. **Guardrail on or off** — the output screen for the untrusted-output
+   tools. Each path picks its natural provider (table above). On the AWS
    path it's always on; locally, on is the default and off skips the HF setup —
    set it off only if you accept unscreened external content reaching your
    model context.

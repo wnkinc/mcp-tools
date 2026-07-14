@@ -51,7 +51,7 @@ pulumi stack init prod
 pulumi config set aws:region us-east-1
 pulumi config set domain example.com
 pulumi config set cloudflareStack organization/mcp-tools-cloudflare/prod
-pulumi config set tools xmcp,telegram        # your pick of xmcp,data,lean,telegram
+pulumi config set tools xmcp,telegram        # your pick from the README's tools table
 ```
 
 (`cloudflareStack` is the step-1 stack's full name on your shared Pulumi

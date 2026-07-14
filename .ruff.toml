@@ -3,10 +3,10 @@
 target-version = "py311"
 line-length = 100
 
-# Each tool dir is its own import root inside its container (server.py imports
-# siblings like `lake`/`feeds` top-level); listing them keeps isort classifying
-# those as first-party.
-src = [".", "tools/data", "tools/lean", "tools/xmcp"]
+# A tool dir is its own import root inside its container; list a tool here ONLY
+# if its server.py imports siblings top-level (data: `lake`/`feeds`), so isort
+# classifies those as first-party.
+src = [".", "tools/data"]
 
 extend-exclude = ["vendor"]
 

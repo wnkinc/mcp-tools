@@ -20,8 +20,8 @@ xmcp (internal net, no gateway) ──HTTPS_PROXY──▶ egress:3128 ──all
 ```
 
 ## Files
-- `squid.compose.conf` — the sidecar's config: one listener per service (`3128` x-mcp /
-  `3129` data / `3130` lean / `3131` telegram / `3132` approval / `3133` guardrail),
+- `squid.compose.conf` — the sidecar's config: one named listener per service
+  (the `http_port ... name=` lines at its top are the authoritative port map),
   default-deny. Mounted read-only into the `egress` service.
 - `allowlist/<service>.txt` — that service's allowed domains, mounted at
   `/etc/squid/allowlist/`.

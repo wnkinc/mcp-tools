@@ -13,11 +13,11 @@ MANIFESTS = sorted(TOOLS.glob("*/deploy.json"))
 
 def test_every_profile_tool_ships_a_manifest():
     # The compose profiles (= deployable tools) and the manifest set must agree.
+    # (Non-vacuity of the manifest glob is test_stack.py's job.)
     compose = (TOOLS.parent / "docker-compose.yml").read_text()
     profiled = {m.parent.name for m in MANIFESTS}
     for tool in profiled:
         assert f'profiles: ["{tool}"]' in compose, f"{tool} has a manifest but no profile"
-    assert {"xmcp", "data", "lean", "telegram"} <= profiled
 
 
 @pytest.mark.parametrize("path", MANIFESTS, ids=lambda p: p.parent.name)
