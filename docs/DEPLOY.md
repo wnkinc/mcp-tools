@@ -26,21 +26,21 @@ while keeping its domain, tunnel, and credentials.
    path it's always on; locally, on is the default and off skips the HF setup —
    set it off only if you accept unscreened external content reaching your
    model context.
-3. **Approvals — needs-approval, always-allow, or blocked.** The server-side
-   version of Claude's per-tool "always allow / needs approval / blocked": the
-   desktop toggle is sticky (approve once and it sticks across every chat) and
-   doesn't reliably apply to custom connectors, so the stack owns the gate. For
-   the gated tools (`xmcp`, `telegram`):
-   - **Needs approval** (default) — a gated write call posts an Approve/Deny
-     card to your approval channel and reports a pending status in chat until
-     you tap it. Choose a provider: `APPROVAL_PROVIDER` = `slack`, `discord`, or
-     `telegram` in the sidecar's `.env`. A channel **must** be configured, or
-     every gated call fails "approval undeliverable" — there is no silent
-     fallback. Pick a platform the agent does **not** operate: if its own tools
-     can read the card and press the buttons, the gate approves itself.
-   - **Always allow** — `MCP_REQUIRE_APPROVAL=0` in the root `.env`; gated write
-     actions run ungated.
-   - **Blocked** — just don't deploy that tool.
+3. **Approvals — the human-in-the-loop layer.** The server-side version of
+   Claude's per-tool "always allow / needs approval / blocked": the desktop
+   toggle is sticky (approve once and it sticks across every chat) and doesn't
+   reliably apply to custom connectors, so the stack owns the gate. It's on by
+   default, and every tool starts **`always_allow`** (Claude's own permission
+   UI is the first defense line) — you then gate or block individual tools at
+   runtime via the gatekeeper's panel or `set_gating`
+   ([docs/GATEKEEPER.md](GATEKEEPER.md)); nothing needs a redeploy. A gated
+   call posts an Approve/Deny card to your channel: `APPROVAL_PROVIDER` =
+   `slack`, `discord`, or `telegram` in the sidecar's `.env`. A channel **must**
+   be configured for gated calls to proceed — without one they report the
+   approval as undeliverable, never silently run. Pick a platform the agent
+   does **not** operate: a card its own tools can read and click is a gate that
+   approves itself. `MCP_REQUIRE_APPROVAL=0` in the root `.env` removes the
+   layer entirely.
 
 ## What every deployment needs (gathered up front)
 

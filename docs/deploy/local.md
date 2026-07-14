@@ -24,8 +24,8 @@ cp env.example .env
 
 In `.env`, set `COMPOSE_PROFILES` to your tools, e.g. `xmcp,data`. That's the
 only deploy-time choice: only listed tools build and run, and the substrate
-(egress wall, approval sidecar, gatekeeper, and — whenever an untrusted tool
-like xmcp/telegram is listed — the guardrail) comes up on its own.
+(egress wall, approval sidecar, gatekeeper, and — whenever an untrusted-output
+tool is listed — the guardrail) comes up on its own.
 
 ## 2. Guardrail (output screen)
 
@@ -105,13 +105,15 @@ URI.
 This is the server-side version of Claude's per-tool "always allow / needs
 approval / blocked": the desktop toggle is sticky (approve once and it sticks
 across every chat) and doesn't reliably apply to custom connectors, so the
-always-on approval sidecar owns the gate. The gated tools default to **needs
-approval** — a gated call reports a plain pending status in chat while an
-Approve/Deny card lands in your channel. (No link goes to the chat — a tool
-result carrying an approval URL reads as prompt injection and gets flagged or
-refused.) Pick one posture:
+always-on approval sidecar owns the gate. Every tool starts **`always_allow`**
+(Claude's own permission UI is the first defense line); you gate or block
+individual tools at runtime via the gatekeeper's panel or `set_gating`
+([docs/GATEKEEPER.md](../GATEKEEPER.md)) — nothing needs a redeploy. A gated
+call then reports a plain pending status in chat while an Approve/Deny card
+lands in your channel. (No link goes to the chat — a tool result carrying an
+approval URL reads as prompt injection and gets flagged or refused.)
 
-- **Needs approval** (default) — configure a channel:
+- **Configure the channel** (do this unless you opt the layer off):
 
   ```bash
   cp security/approval/service/env.example security/approval/service/.env
@@ -124,13 +126,12 @@ refused.) Pick one posture:
   the webhook checks, so run those *after* the sidecar is up. Use a platform
   your agent doesn't operate — a card its own tools can read and click defeats
   the gate. Without a channel configured, gated calls report the approval as
-  undeliverable.
+  undeliverable — they never silently run.
 
-- **Always allow** — `MCP_REQUIRE_APPROVAL=0` in the root `.env`; write actions
-  on the gated tools then run ungated.
+- **No approval layer at all** — `MCP_REQUIRE_APPROVAL=0` in the root `.env`.
 
-- **Blocked** — leave that tool out of your deploy (drop it from the tools you
-  bring up).
+- **Blocked** — a per-tool mode in the panel; or leave the tool out of your
+  deploy entirely.
 
 ## 6. Per-tool secrets
 

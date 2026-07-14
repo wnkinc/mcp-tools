@@ -124,11 +124,14 @@ sudo docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
 
 The server-side version of Claude's per-tool "always allow / needs approval /
 blocked": the desktop toggle is sticky across chats and doesn't reliably apply
-to custom connectors, so the always-on sidecar owns the gate. The gated tools
-default to **needs approval** — a gated call reports a plain pending status in
-chat and posts an Approve/Deny card to your channel. Pick one posture:
+to custom connectors, so the always-on sidecar owns the gate. Every tool starts
+**`always_allow`** (Claude's own permission UI is the first defense line); you
+gate or block individual tools at runtime via the gatekeeper's panel or
+`set_gating` ([docs/GATEKEEPER.md](../GATEKEEPER.md)) — nothing needs a
+redeploy. A gated call then reports a plain pending status in chat and posts an
+Approve/Deny card to your channel:
 
-- **Needs approval** (default) — on the VM,
+- **Configure the channel** — on the VM,
   `sudo cp security/approval/service/env.example security/approval/service/.env`,
   set `APPROVAL_PROVIDER` to `slack`, `discord`, or `telegram`, follow that
   provider's steps inside the file (webhook URL
@@ -137,12 +140,12 @@ chat and posts an Approve/Deny card to your channel. Pick one posture:
   the secret the webhook checks, so run those *after* the sidecar is up. Use a
   platform your agent doesn't operate — a card its own tools can read and click
   defeats the gate. Without a channel configured, gated calls report the
-  approval as undeliverable.
+  approval as undeliverable — they never silently run.
 
-- **Always allow** — `MCP_REQUIRE_APPROVAL=0` in the root `.env`; write actions
-  on the gated tools then run ungated.
+- **No approval layer at all** — `MCP_REQUIRE_APPROVAL=0` in the root `.env`.
 
-- **Blocked** — leave that tool out of the `tools` config (step 2).
+- **Blocked** — a per-tool mode in the panel; or leave the tool out of the
+  `tools` config (step 2) so it never deploys.
 
 ## 7. Verify + connect Claude
 

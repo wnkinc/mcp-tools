@@ -15,7 +15,7 @@ xmcp container :8061                          FastMCP server on an internal Dock
         ▼
 egress sidecar (squid) :3128                  per-tool domain allowlist, default-deny, audit log
         ▼
-api.x.com (read-only bearer, allowlisted ops) + api.x.ai (grok_x_search) + Google OAuth verify
+api.x.com (allowlisted ops, OAuth1-signed / read-only bearer) + Google OAuth verify
 ```
 
 The same image runs locally (`docker compose up`) and in the cloud — transport
@@ -50,9 +50,10 @@ The same image runs locally (`docker compose up`) and in the cloud — transport
 - **The guardrail is a provider switch, matched to the deployment path.** The sidecar's
   `/scan` contract is fixed; `GUARDRAIL_PROVIDER` picks the engine behind it —
   `llamafirewall` (local model; the local default) or `bedrock` (Amazon Bedrock
-  Guardrails ApplyGuardrail; the AWS default, provisioned by `deploy/aws`). Both leave
-  through the guardrail's own egress-wall listener, and the tool middleware fails
-  closed either way.
+  Guardrails ApplyGuardrail; the AWS path's provider, provisioned by `deploy/aws`).
+  Both leave through the guardrail's own egress-wall listener, both prove detection
+  during startup (a canonical injection must block or the container refuses to
+  report healthy), and the tool middleware fails closed either way.
 
 - **Deployment is a chooser, one stack.** `docs/DEPLOY.md` routes to two runbooks —
   your own box (`docs/deploy/local.md`) or an EC2 VM provisioned end-to-end by the
@@ -128,4 +129,8 @@ inserts the compose service (opt-in `profiles:` entry + state volume) into
    list), `docker compose up -d --build <name>`, then add the custom connector in
    Claude (desktop + web).
 
-The script's own output prints the exact config snippets for each step.
+The script's own output prints the exact config snippets for each step, the
+`new-tool` skill (`.claude/skills/new-tool/`) walks an agent through the
+decisions in order, and `security/test_stack.py` (CI, the `pytest (security)`
+job) cross-checks the wiring — a missed step fails the PR with a message naming
+the missing piece.
