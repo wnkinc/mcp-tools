@@ -22,7 +22,7 @@ PY=/tmp/verify-env/bin/python
 ```bash
 APPROVAL_PUBLIC_URL=http://127.0.0.1:18072 APPROVAL_PORT=18072 $PY security/approval/service/service.py &
 APPROVAL_URL=http://127.0.0.1:18072 APPROVAL_PUBLIC_URL=http://127.0.0.1:18072 \
-  SPIKE_APPROVAL_WIDGET=1 MCP_PORT=18065 $PY tools/gatekeeper/server.py &
+  APPROVAL_WIDGET=1 MCP_PORT=18065 $PY tools/gatekeeper/server.py &
 curl -s http://127.0.0.1:18072/healthz   # sidecar up; provider slack/unconfigured is fine locally
 ```
 
@@ -38,7 +38,7 @@ curl -s http://127.0.0.1:18072/healthz   # sidecar up; provider slack/unconfigur
 `fastmcp.Client("http://127.0.0.1:<port>/mcp")` → `list_tools()` / `call_tool()`.
 
 - Gated call round-trip without a chat channel: run servers with
-  `SPIKE_APPROVAL_WIDGET=1`; the pending text carries
+  `APPROVAL_WIDGET=1`; the pending text carries
   `<!--APPROVAL {"token": ...}-->` — parse the token and
   `POST {sidecar}/approve/{token}` with form `decision=approve` (what the human's
   browser does), then re-call the tool with the same args.

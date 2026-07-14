@@ -1,18 +1,21 @@
-"""SPIKE round 3 (Option A, telegram only): approval widget via ONE shared piece.
+"""The in-chat approval card (approve.html), plus the shared widget plumbing.
 
-Enabled by SPIKE_APPROVAL_WIDGET=1. The design: a single middleware tags tools in
-tools/list with the approval widget's _meta, so the host renders the in-chat card
-when those tools are called -- no per-tool code. Which tools get the card is just a
-LIST (here the render-test set; the real build tags the gated/non-exempt set).
+Opt-in per tool via APPROVAL_WIDGET=1 (see serve()): one middleware tags every
+needs_approval tool in tools/list with the widget's _meta, so the host renders the
+in-chat Approve/Deny card when a gated call returns its pending status -- no
+per-tool code, and the card always agrees with the gate because both read the same
+sidecar modes.
 
-The widget flips the gate by a DIRECT fetch to the sidecar /approve/{token} (proven
-session-proof on web+desktop). Because the model can't make HTTP requests and there
-is no tool that flips the gate, the token is harmless in the tool result -- so it
-rides the result content and needs no forge-proof _meta plumbing.
+The widget flips the gate by a DIRECT fetch to the sidecar /approve/{token}
+(session-proof on web+desktop). Because the model can't make HTTP requests and no
+tool flips the gate, the token is harmless in the tool result -- so it rides the
+result content and needs no forge-proof _meta plumbing.
 
-The flow is proven and live (the gatekeeper's set_gating approval loop runs on it);
-the approval_probe render-test tool that validated it was removed 2026-07-13 --
-recover from git history if a harmless gated stand-in is ever needed again.
+widget_html/widget_uri/_public_base are the shared plumbing every in-chat widget
+uses (the manage panel and secrets form import them from here). History: built as
+the SPIKE_APPROVAL_WIDGET spike, promoted 2026-07-14; its approval_probe render-test
+tool was removed 2026-07-13 (recover from git history if a harmless gated stand-in
+is ever needed again).
 """
 
 from __future__ import annotations
@@ -89,7 +92,7 @@ class WidgetMetaMiddleware(Middleware):
         return out
 
 
-def register_widget_spike(mcp) -> None:  # type: ignore[no-untyped-def]
+def register_approve_widget(mcp) -> None:  # type: ignore[no-untyped-def]
     uri = widget_uri(mcp.name, "approve.html")
     _csp = {"connectDomains": [b for b in [_public_base()] if b]}
     mcp.resource(

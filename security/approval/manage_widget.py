@@ -17,7 +17,7 @@ import os
 
 import httpx
 
-from security.approval.widget_spike import _public_base, widget_html, widget_uri
+from security.approval.approve_widget import _public_base, widget_html, widget_uri
 
 
 def register_manage_widget(mcp) -> None:  # type: ignore[no-untyped-def]
