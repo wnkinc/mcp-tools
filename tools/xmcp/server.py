@@ -302,10 +302,6 @@ def print_tool_list(spec: dict) -> None:
 def create_mcp() -> FastMCP:
     load_env()
     debug_enabled = setup_logging()
-    parser_flag = os.getenv("FASTMCP_EXPERIMENTAL_ENABLE_NEW_OPENAPI_PARSER")
-    if parser_flag is not None:
-        os.environ["FASTMCP_EXPERIMENTAL_ENABLE_NEW_OPENAPI_PARSER"] = parser_flag
-
     base_url = os.getenv("X_API_BASE_URL", "https://api.x.com")
     timeout = float(os.getenv("X_API_TIMEOUT", "30"))
 
@@ -440,7 +436,7 @@ def create_mcp() -> FastMCP:
 
 
 def main() -> None:
-    port = int(os.getenv("MCP_PORT", "8000"))
+    port = int(os.getenv("MCP_PORT", "8061"))
     mcp = create_mcp()
     # x-mcp returns UNTRUSTED external X content, so screen output; and gate every call
     # behind out-of-band human approval. source names this tool across the security
