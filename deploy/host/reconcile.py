@@ -105,6 +105,26 @@ def env_values(env_path: Path) -> dict[str, str]:
     return env_values_from_text(env_path.read_text())
 
 
+def set_env_value(text: str, key: str, value: str) -> str:
+    """KEY=value into env-file text: replace the (possibly commented-out) line if
+    present, else append. Replacement goes through a lambda (not a plain
+    replacement string) so backslashes in the value land literally."""
+    pattern = re.compile(rf"^#?\s*{re.escape(key)}=.*$", re.MULTILINE)
+    if pattern.search(text):
+        return pattern.sub(lambda _m: f"{key}={value}", text, count=1)
+    return text.rstrip("\n") + f"\n{key}={value}\n"
+
+
+def ensure_env(repo: Path, tool: str) -> Path:
+    """tools/<tool>/.env, created 0600 from its env.example if absent."""
+    env_path = repo / "tools" / tool / ".env"
+    if not env_path.exists():
+        template = repo / "tools" / tool / "env.example"
+        env_path.write_text(template.read_text() if template.exists() else "")
+        os.chmod(env_path, 0o600)
+    return env_path
+
+
 def shared_identity_values(repo: Path, exclude_tool: str) -> dict[str, str]:
     """The deployment-wide values (MCP-auth identity) from the first sibling tool
     .env that carries them all -- the source both kinds of seeding draw from."""
@@ -144,11 +164,7 @@ def secrets_state(repo: Path, manifest: dict) -> tuple[bool, list[str]]:
 def materialize_env(repo: Path, tool: str, manifest: dict) -> None:
     """Ensure tools/<tool>/.env exists and carries everything not user-supplied:
     the template, the shared MCP-auth identity, and manifest default_from fills."""
-    env_path = repo / "tools" / tool / ".env"
-    if not env_path.exists():
-        template = repo / "tools" / tool / "env.example"
-        env_path.write_text(template.read_text() if template.exists() else "")
-        os.chmod(env_path, 0o600)
+    env_path = ensure_env(repo, tool)
     text = seed_shared_identity(repo, tool, env_path.read_text())
     have = env_values_from_text(text)
     shared = shared_identity_values(repo, tool)
@@ -160,11 +176,7 @@ def materialize_env(repo: Path, tool: str, manifest: dict) -> None:
         value = resolve_default(secret, shared)
         if not value:
             continue
-        pattern = re.compile(rf"^#?\s*{re.escape(key)}=.*$", re.MULTILINE)
-        if pattern.search(text):
-            text = pattern.sub(lambda _m, k=key, v=value: f"{k}={v}", text, count=1)
-        else:
-            text = text.rstrip("\n") + f"\n{key}={value}\n"
+        text = set_env_value(text, key, value)
         filled.append(key)
     env_path.write_text(text)
     os.chmod(env_path, 0o600)
@@ -289,9 +301,10 @@ def process_request(repo: Path, req: dict, manifests: dict) -> dict:
 HEALTHY_TIMEOUT = 180  # image start + first healthcheck window
 
 
-def wait_healthy(repo: Path, tool: str, timeout: float | None = None) -> str | None:
-    """None when the service reaches running+healthy; else a failure detail with logs."""
-    timeout = HEALTHY_TIMEOUT if timeout is None else timeout
+def wait_healthy(repo: Path, tool: str) -> str | None:
+    """None when the service reaches running+healthy; else a failure detail with logs.
+    Reads HEALTHY_TIMEOUT at call time (tests shrink it via monkeypatch)."""
+    timeout = HEALTHY_TIMEOUT
     deadline = time.time() + timeout
     last = "no status"
     while time.time() < deadline:
@@ -337,24 +350,15 @@ def seed_shared_identity(repo: Path, tool: str, text: str) -> str:
     missing = [k for k in SHARED_IDENTITY_KEYS if not have.get(k)]
     if not missing:
         return text
-    for sibling in sorted((repo / "tools").glob("*/.env")):
-        if sibling.parent.name == tool:
-            continue
-        values = env_values(sibling)
-        if all(values.get(k) for k in SHARED_IDENTITY_KEYS):
-            for key in missing:
-                pattern = re.compile(rf"^#?\s*{re.escape(key)}=.*$", re.MULTILINE)
-                if pattern.search(text):
-                    text = pattern.sub(lambda _m, k=key, v=values[key]: f"{k}={v}", text, count=1)
-                else:
-                    text = text.rstrip("\n") + f"\n{key}={values[key]}\n"
-            log(
-                f"seeded shared MCP-auth identity into tools/{tool}/.env (from {sibling.parent.name})"
-            )
-            return text
-    log(
-        f"WARNING: no sibling .env carries the shared identity; tools/{tool}/.env is missing {missing}"
-    )
+    shared = shared_identity_values(repo, tool)
+    if not shared:
+        log(
+            f"WARNING: no sibling .env carries the shared identity; tools/{tool}/.env is missing {missing}"
+        )
+        return text
+    for key in missing:
+        text = set_env_value(text, key, shared[key])
+    log(f"seeded shared MCP-auth identity into tools/{tool}/.env")
     return text
 
 
@@ -372,20 +376,10 @@ def apply_staging(repo: Path, manifests: dict) -> None:
         log(f"staging {staging.get('id')} REFUSED (unknown tool or keys); discarded")
         write_json(path, {})
         return
-    env_path = repo / "tools" / tool / ".env"
-    if not env_path.exists():
-        template = repo / "tools" / tool / "env.example"
-        env_path.write_text(template.read_text() if template.exists() else "")
-        os.chmod(env_path, 0o600)
+    env_path = ensure_env(repo, tool)
     text = env_path.read_text()
     for key, value in values.items():
-        pattern = re.compile(rf"^#?\s*{re.escape(key)}=.*$", re.MULTILINE)
-        if pattern.search(text):
-            # lambda (not a plain replacement string) so backslashes in the value
-            # land literally; default args bind the loop vars (B023).
-            text = pattern.sub(lambda _m, k=key, v=value: f"{k}={v}", text, count=1)
-        else:
-            text = text.rstrip("\n") + f"\n{key}={value}\n"
+        text = set_env_value(text, key, value)
     env_path.write_text(text)
     os.chmod(env_path, 0o600)
     # User values are in; now fill everything the deployment already knows
