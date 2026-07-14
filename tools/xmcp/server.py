@@ -15,9 +15,7 @@ Our delta from upstream, besides the auth-flow trim: the ``serve()`` wrapper
 (Google OAuth, out-of-band approval, guardrail), the write-guard + allowlist
 default (upstream exposes all ~140 ops unconditionally), MCP ``ToolAnnotations``
 (``readOnlyHint`` drives Claude's read-only vs write/delete permission categories;
-upstream sets none), and the guardrail outputSchema strip. A custom ``grok_x_search``
-tool (xAI Grok's own X search; not part of upstream) lived here until 2026-07-04 --
-recover it from git history if wanted; its XAI_* env keys remain parked in `.env`.
+upstream sets none), and the guardrail outputSchema strip.
 """
 
 import copy
