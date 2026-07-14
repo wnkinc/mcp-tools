@@ -36,10 +36,10 @@ services:
       - internal   # reachable by tools as http://egress:<port>
       - edge       # the only leg with internet -> performs the allowlisted CONNECTs
 
-  # Output screen for the untrusted tools (xmcp, telegram). NOT a deploy choice: it
-  # lists those tools' profiles, so compose starts it automatically whenever one of
-  # them is deployed (a data/lean-only stack skips it); a new untrusted tool adds its
-  # profile name here. The provider behind /scan is env-chosen: llamafirewall (local
+  # Output screen for the untrusted-output tools. NOT a deploy choice: its `profiles`
+  # line below is the authoritative list of them, so compose starts it automatically
+  # whenever one is deployed (a trusted-tools-only stack skips it); a new untrusted
+  # tool adds its profile name there. The provider behind /scan is env-chosen: llamafirewall (local
   # model, default) or bedrock (AWS ApplyGuardrail; what deploy/aws sets). Running an
   # untrusted tool UNSCREENED (not recommended) is an explicit env choice --
   # MCP_UNTRUSTED_OUTPUT=0 on that tool; the tools fail closed on a half-off state.
@@ -152,7 +152,6 @@ services:
     # `docker compose exec` or a container on mcp-tools_internal.
     environment:
       MCP_HOST: 0.0.0.0
-      MCP_PORT: 8061
       MCP_TRANSPORT: http
       # Security posture for local dev (the tunnel overlay flips these on). These override
       # the .env's production values (env beats env_file).
@@ -354,6 +353,11 @@ services:
     networks:
       - internal
     depends_on:
+      guardrail:
+        condition: service_healthy   # wait for the screener before starting
+        required: false              # profile-gated: absent guardrail = start anyway
+      approval:
+        condition: service_started
       egress:
         condition: service_started
 
