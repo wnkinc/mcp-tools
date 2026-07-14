@@ -47,6 +47,14 @@ def repo(tmp_path, monkeypatch):
     fake.write_text(
         "#!/bin/bash\n"
         f'echo "$@" >> "{tmp_path}/docker.log"\n'
+        'if [[ "$*" == *"--format json"* ]]; then\n'
+        f'  if [ -f "{tmp_path}/unhealthy.flag" ]; then\n'
+        '    echo \'{"State":"restarting","Health":""}\'\n'
+        "  else\n"
+        '    echo \'{"State":"running","Health":"healthy"}\'\n'
+        "  fi\n"
+        "  exit 0\n"
+        "fi\n"
         'for a in "$@"; do [ "$a" = ps ] && echo xmcp; done\n'
         "exit 0\n"
     )
@@ -169,3 +177,48 @@ def test_staging_refuses_unknown_tool_or_keys_and_discards(repo):
     )
     rec.run_once(repo)
     assert rec.read_json(rec.control_dir(repo) / "staging.json") == {}
+
+
+def test_staging_seeds_the_shared_mcp_auth_identity(repo):
+    # The staging form only carries per-tool secrets; the shared Claude-auth trio
+    # (client id/secret + email allowlist) must arrive from a sibling tool's .env
+    # or the fresh tool fails closed at startup.
+    (repo / "tools" / "other").mkdir()
+    (repo / "tools" / "other" / ".env").write_text(
+        "GOOGLE_CLIENT_ID=shared-id\nGOOGLE_CLIENT_SECRET=shared-secret\n"
+        "MCP_ALLOWED_GOOGLE_EMAILS=me@example.com\n"
+    )
+    (repo / "tools" / "weather" / "env.example").write_text(
+        "W_KEY=\nMCP_AUTH_ENABLED=1\nGOOGLE_CLIENT_ID=\nGOOGLE_CLIENT_SECRET=\n"
+        "MCP_ALLOWED_GOOGLE_EMAILS=\n"
+    )
+    rec.write_json(
+        rec.control_dir(repo) / "staging.json",
+        {"id": "seed1", "tool": "weather", "values": {"W_KEY": "k"}},
+    )
+    rec.run_once(repo)
+    text = (repo / "tools" / "weather" / ".env").read_text()
+    assert "GOOGLE_CLIENT_ID=shared-id" in text
+    assert "GOOGLE_CLIENT_SECRET=shared-secret" in text
+    assert "MCP_ALLOWED_GOOGLE_EMAILS=me@example.com" in text
+    assert "W_KEY=k" in text
+
+
+def test_deploy_reports_failed_when_the_container_never_gets_healthy(repo, monkeypatch):
+    # `up -d` exiting 0 only creates the container; a crash-looping tool must
+    # surface as failed with its logs, never as done.
+    monkeypatch.setattr(rec, "HEALTHY_TIMEOUT", 0.2)
+    (repo / "unhealthy.flag").touch()
+    (repo / "tools" / "weather" / ".env").write_text("W_KEY=abc\n")
+    _request(repo, rid="r-unhealthy")
+    rec.run_once(repo)
+    st = _status(repo)
+    assert st["phase"] == "failed" and "did not become healthy" in st["detail"]
+
+
+def test_deploy_done_requires_running_and_healthy(repo):
+    (repo / "tools" / "weather" / ".env").write_text("W_KEY=abc\n")
+    _request(repo, rid="r-healthy")
+    rec.run_once(repo)
+    st = _status(repo)
+    assert st["phase"] == "done" and "healthy" in st["detail"]
