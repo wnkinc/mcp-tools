@@ -44,7 +44,7 @@ jobs:
         # expected-red -- the egress Dockerfile exists to patch it; the built image
         # is scanned in the next step instead).
         run: |
-          refs=$(grep -rhoE '[a-z0-9./_-]+@sha256:[a-f0-9]{64}' \
+          refs=$(grep -rhoE '[a-z0-9./_-]+(:[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}' \
               tools/*/Dockerfile security/*/service/Dockerfile docker-compose*.yml \
             | sort -u | grep -vE 'quantconnect|ubuntu/squid')
           echo "scanning:"; echo "$refs"
