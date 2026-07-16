@@ -58,27 +58,6 @@ gatekeeper tool ──► approval sidecar (sole authority on modes) ◄── e
   changing a safety gate always takes a human approval, and no runtime path — tool or
   widget — can lift that pin.
 
-- **`deploy_status()`** is the read-only deployment inventory: deployed tools (live
-  startup beacons) with last-used, stale leftovers, and undeployed tools from the
-  codebase — each described by its `tools/<name>/deploy.json` manifest (summary, the
-  secrets enabling it needs and where to get them, notes like image size), plus
-  secrets-staged state and in-flight deploy progress from the reconciler.
-- **`stage_secrets(name)`** opens an in-chat form for the tool's secrets (one row
-  per manifest entry, password fields). Values POST **directly browser → sidecar →
-  the reconciler's staging handoff → `tools/<name>/.env`** — they never enter chat
-  content, tool results, or the model's context, and no endpoint ever returns a
-  stored value (the form only learns staged/missing booleans). Sessions are
-  one-shot; the handoff file is the only non-world-readable control file and is
-  blanked the moment the `.env` is written.
-- **`deploy_tool(name)`** deploys an undeployed tool, one at a time — **pinned
-  `needs_approval`** like `set_gating`, so every deploy takes explicit human consent.
-  It only ever *requests*: the **host reconciler** (`deploy/host/`, a small systemd
-  service outside every container — containers never hold Docker rights) validates
-  and applies it, and `deploy_status` tracks progress. Secrets never pass through
-  chat: they're staged in `tools/<name>/.env` on the host, and the flow only checks
-  readiness. Without the reconciler installed, `deploy_tool` says so and the manual
-  steps in the deploy runbook still work.
-
 The gatekeeper itself is **not manageable**: the sidecar refuses every mode write
 against the `gatekeeper` source and leaves it out of the panel. Its tools' behavior
 is fixed in code — `set_gating` always needs approval, and `manage_tools` only ever

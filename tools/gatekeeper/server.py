@@ -3,19 +3,7 @@
 The approval sidecar is the sole authority on tool modes (see
 security/approval/gating.py): each approval-enabled server registers its full tool
 catalog there, every tool defaults to always_allow, and the operator's choices are
-stored per (source, tool). Five tools:
-
-  - deploy_status() -- read-only deployment inventory: what's running (live startup
-        beacons), what's stale, and what else the codebase ships (tools/*/deploy.json
-        manifests) with the secrets/notes enabling each would involve, secrets-staged
-        state, and in-flight deploy progress. The free companion to deploy_tool.
-  - deploy_tool(name) -- request deploying an undeployed tool (PINNED needs_approval:
-        a human approves every deploy). Only ever writes a request; the HOST
-        reconciler (deploy/host/) validates and applies it. Secrets never pass
-        through here -- they're staged on the host, this only checks readiness.
-  - stage_secrets(name) -- in-chat secrets form (a widget): the user types the
-        tool's API keys into the form, values POST browser->sidecar->reconciler,
-        never through chat (see security/approval/secrets_widget.py).
+stored per (source, tool). Two tools:
 
   - manage_tools()  -- the in-chat permissions panel (a widget, one section per
         connector; see security/approval/manage_widget.py). The human review-and-save
@@ -33,10 +21,8 @@ always takes a human approval), and manage_tools is inherently human-in-the-loop
 (nothing changes until the user clicks Save).
 """
 
-import json
 import os
 import sys
-import time
 from pathlib import Path
 from typing import Literal
 
@@ -45,215 +31,11 @@ from fastmcp import FastMCP
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from security.approval.manage_widget import register_manage_widget  # noqa: E402
-from security.approval.secrets_widget import register_secrets_widget  # noqa: E402
 from security.serve import serve  # noqa: E402
 
 mcp = FastMCP(name="gatekeeper")
 
 APPROVAL_URL = os.getenv("APPROVAL_URL", "http://approval:8072").rstrip("/")
-
-# A source whose startup beacon (~30s cadence) arrived within this window is
-# currently deployed; older/absent means its container is gone (stale state).
-DEPLOYED_WINDOW_SECONDS = 90
-
-# tools/*/deploy.json -- each tool's deploy manifest (what it is, which secrets it
-# needs and where to get them, notes like image size). The gatekeeper image bakes
-# the whole tools/ tree, so a rebuild picks up new tools automatically.
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-
-
-def load_manifests(tools_dir: Path = TOOLS_DIR) -> dict[str, dict]:
-    """Every shipped tool's deploy manifest, keyed by profile name."""
-    manifests = {}
-    for path in sorted(tools_dir.glob("*/deploy.json")):
-        m = json.loads(path.read_text())
-        manifests[m["profile"]] = m
-    return manifests
-
-
-def _ago(epoch: float | None, now: float) -> str:
-    if not epoch:
-        return "never"
-    s = max(0.0, now - epoch)
-    if s < 5400:
-        return f"{round(s / 60)}m ago"
-    if s < 129600:
-        return f"{round(s / 3600)}h ago"
-    return f"{round(s / 86400)}d ago"
-
-
-def format_deploy_status(
-    manifests: dict, sources: dict, deploy: dict | None = None, now: float | None = None
-) -> str:
-    """The agent-facing inventory: deployed tools (from live beacons), undeployed
-    ones (manifest present, no fresh beacon) with what enabling each would take,
-    plus the reconciler's view (secrets staged? an operation in flight?)."""
-    now = now or time.time()
-    deploy = deploy or {}
-    inventory = deploy.get("inventory") or {}
-    fresh = {
-        s
-        for s, st in sources.items()
-        if st.get("registered") and now - st["registered"] < DEPLOYED_WINDOW_SECONDS
-    }
-    lines = ["Deployed (live startup beacon):"]
-    for src in sorted(fresh):
-        if src == "gatekeeper":
-            continue
-        st = sources[src]
-        lines.append(f"  - {src}: {st['tools']} tools, last used {_ago(st.get('seen'), now)}")
-    stale = sorted(s for s in sources if s not in fresh and s != "gatekeeper")
-    if stale:
-        lines.append("Stale (stored state, no live server):")
-        for src in stale:
-            lines.append(f"  - {src}: last registered {_ago(sources[src].get('registered'), now)}")
-    undeployed = sorted(p for p in manifests if p not in fresh)
-    if undeployed:
-        lines.append("Available to deploy (in the codebase, not running):")
-        for profile in undeployed:
-            m = manifests[profile]
-            lines.append(f"  - {profile}: {m['summary']}")
-            # Prerequisites FIRST: human browser steps (console config, API
-            # enablement) that must happen before secrets or deploys make sense.
-            for i, step in enumerate(m.get("prerequisites", []), 1):
-                lines.append(f"      before anything, step {i}: {step}")
-            inv = inventory.get(profile)
-            if m.get("secrets"):
-                needs = "; ".join(f"{s['label']} ({s['hint']})" for s in m["secrets"])
-                lines.append(f"      secrets needed: {needs}")
-                if inv is not None:
-                    staged = (
-                        "staged ✓"
-                        if inv.get("secrets_ready")
-                        else f"missing: {', '.join(inv.get('missing_secrets', []))}"
-                    )
-                    lines.append(f"      secrets staged: {staged}")
-            else:
-                lines.append("      secrets needed: none beyond the shared Google OAuth identity")
-            for note in m.get("notes", []):
-                lines.append(f"      note: {note}")
-    # The reconciler's own state: whether chat-driven deploys can execute at all,
-    # and what the last / current operation did.
-    reconciler = deploy.get("reconciler", "absent")
-    if reconciler == "live":
-        if deploy.get("in_flight"):
-            op = deploy.get("request") or deploy.get("status") or {}
-            phase = (deploy.get("status") or {}).get("phase", "queued")
-            lines.append(
-                f"Deploy in flight: {op.get('tool')} ({phase}) -- re-check deploy_status "
-                "for progress; large images take minutes."
-            )
-        else:
-            last = deploy.get("status") or {}
-            if last.get("phase"):
-                lines.append(
-                    f"Last deploy operation: {last.get('tool')} -> {last['phase']}"
-                    + (f" ({last.get('detail')})" if last.get("detail") else "")
-                )
-            if undeployed:
-                lines.append(
-                    "To deploy, in order: (1) the tool's prerequisites above, if any "
-                    "(browser steps the user does; every tool also needs "
-                    "https://<subdomain>.<your-domain>/auth/callback on the shared Google "
-                    "OAuth client for connecting Claude); (2) stage its secrets -- "
-                    "stage_secrets(<name>) opens an in-chat form (values go directly to "
-                    "the server, never through chat), or fill tools/<name>/.env on the "
-                    "host; (3) deploy_tool(<name>) -- needs the user's approval, applies "
-                    "via the host reconciler; (4) add the connector in claude.ai."
-                )
-    elif undeployed:
-        lines.append(
-            "The deploy reconciler is not running on the host (deploy/host/README.md), so "
-            "deploy_tool can't execute. Manual path: fill tools/<name>/.env, add "
-            "https://<subdomain>.<your-domain>/auth/callback to the shared Google OAuth "
-            "client, add the profile to COMPOSE_PROFILES in the root .env, run docker "
-            "compose (both -f files) up -d --build <name>, then add the connector in "
-            "claude.ai."
-        )
-    return "\n".join(lines)
-
-
-@mcp.tool
-async def deploy_status() -> str:
-    """What this deployment serves and what else it could: deployed tools (with
-    last-used), stale leftovers, and available not-yet-deployed tools from the
-    codebase with the secrets/notes enabling each would involve -- plus whether
-    their secrets are staged and how any in-flight deploy is progressing.
-    Read-only; the free companion to deploy_tool."""
-    async with httpx.AsyncClient(timeout=10) as client:
-        src_resp = await client.get(f"{APPROVAL_URL}/sources")
-        dep_resp = await client.get(f"{APPROVAL_URL}/deploy/state")
-    return format_deploy_status(load_manifests(), src_resp.json(), dep_resp.json())
-
-
-@mcp.tool
-async def deploy_tool(name: str) -> str:
-    """Deploy an available, not-yet-deployed tool from the codebase (one at a
-    time). IMPORTANT: if the tool lists prerequisites (deploy_status shows them --
-    browser steps like OAuth redirect URIs or enabling APIs), CONFIRM with the
-    user that they are done BEFORE calling this: the deploy itself succeeds
-    without them, but the tool then fails at first use. Requires the
-    user's approval, then the host reconciler applies it: profile added, image
-    built, container up -- progress and results via deploy_status. Prerequisite:
-    the tool's secrets staged on the host (deploy_status shows staged/missing).
-    This call only REQUESTS the deploy; it never handles secret values."""
-    manifests = load_manifests()
-    if name not in manifests:
-        return (
-            f"⚠️ `{name}` is not a shipped tool. Available manifests: "
-            f"{', '.join(sorted(manifests))}."
-        )
-    async with httpx.AsyncClient(timeout=10) as client:
-        sources = (await client.get(f"{APPROVAL_URL}/sources")).json()
-        deploy = (await client.get(f"{APPROVAL_URL}/deploy/state")).json()
-    reg = (sources.get(name) or {}).get("registered")
-    if reg and time.time() - reg < DEPLOYED_WINDOW_SECONDS:
-        return f"`{name}` is already deployed (live startup beacon). Nothing to do."
-    if deploy.get("reconciler") != "live":
-        return (
-            "⚠️ The deploy reconciler is not running on the host, so this can't "
-            "execute. Install it (deploy/host/README.md) or follow the manual steps "
-            "in deploy_status. Nothing was changed."
-        )
-    if deploy.get("in_flight"):
-        op = deploy.get("request") or {}
-        return (
-            f"⚠️ A deploy is already in flight ({op.get('tool')}). One at a time -- "
-            "check deploy_status for progress. Nothing was changed."
-        )
-    inv = (deploy.get("inventory") or {}).get(name) or {}
-    if manifests[name].get("secrets") and not inv.get("secrets_ready"):
-        missing = ", ".join(
-            inv.get("missing_secrets") or [s["key"] for s in manifests[name]["secrets"]]
-        )
-        return (
-            f"⚠️ `{name}`'s secrets aren't staged yet (missing: {missing}). Open the "
-            f"in-chat form with stage_secrets('{name}') -- or fill tools/{name}/.env "
-            "on the host directly -- then call this again. Nothing was changed."
-        )
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(f"{APPROVAL_URL}/deploy/request", json={"tool": name})
-    data = resp.json()
-    if not data.get("ok"):
-        return (
-            f"⚠️ Deploy request refused: {data.get('error', 'unknown error')}. Nothing was changed."
-        )
-    notes = "; ".join(manifests[name].get("notes", [])[:2])
-    prereqs = manifests[name].get("prerequisites", [])
-    prereq_note = (
-        " REMIND the user of this tool's browser prerequisites if not already "
-        "done (the tool fails at first use without them): " + " | ".join(prereqs)
-        if prereqs
-        else ""
-    )
-    return (
-        f"🚀 Deploy of `{name}` requested (id {data['id']}) -- the host reconciler is "
-        f"applying it now. Track progress with deploy_status."
-        + (f" Notes: {notes}" if notes else "")
-        + prereq_note
-        + " When it's up, add the connector in claude.ai "
-        f"(https://{manifests[name]['subdomain']}.<your-domain>/mcp)."
-    )
 
 
 @mcp.tool
@@ -263,10 +45,10 @@ async def set_gating(
     source: str,
 ) -> str:
     """Set a tool's mode on `source` (the connector the tool belongs to, e.g.
-    'telegram' -- deploy_status lists them): 'always_allow' runs with no approval card,
-    'needs_approval' needs a human approval per call, 'blocked' disables the tool
-    outright (calls refuse immediately, and it disappears from Claude's tool list
-    once the connector refreshes).
+    'telegram' -- the manage_tools panel lists them): 'always_allow' runs with no
+    approval card, 'needs_approval' needs a human approval per call, 'blocked'
+    disables the tool outright (calls refuse immediately, and it disappears from
+    Claude's tool list once the connector refreshes).
 
     Changing a gate is itself gated, so this call needs your approval first. After it
     applies, refresh the `source` connector so its cards and tool list update.
@@ -290,10 +72,8 @@ async def set_gating(
 
 def main() -> None:
     port = int(os.getenv("MCP_PORT", "8065"))
-    # The in-chat permissions panel (manage_tools + its ui:// resource) and the
-    # secrets-staging form (stage_secrets) -- both human-input widgets.
+    # The in-chat permissions panel (manage_tools + its ui:// resource).
     register_manage_widget(mcp)
-    register_secrets_widget(mcp, load_manifests)
     # Tools default to always_allow like everything else -- EXCEPT set_gating,
     # which the sidecar pins to needs_approval (see _PINNED in its service.py).
     serve(mcp, port=port, require_approval=True)

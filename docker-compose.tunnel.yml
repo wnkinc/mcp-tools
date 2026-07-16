@@ -113,15 +113,15 @@ configs:
         - hostname: workspace.${MCP_DOMAIN}
           service: http://workspace:8066
         # The approval sidecar goes public ONLY on its human-facing paths: the
-        # capability-token pages (approve, the manage widget's session, the secrets
-        # form's session -- tokens are the credential) and the
-        # provider interactivity webhooks (signature/secret-verified) -- point
-        # whichever provider you use at https://approval.<MCP_DOMAIN>/<provider>/interact.
+        # capability-token pages (approve, the manage widget's session -- tokens
+        # are the credential) and the provider interactivity webhooks
+        # (signature/secret-verified) -- point whichever provider you use at
+        # https://approval.<MCP_DOMAIN>/<provider>/interact.
         # Everything else on the sidecar is internal-only and must stay that way:
         # /gate, /gating, /catalog, and the bare /manage token mint are unauthenticated
         # write surfaces for the tools on the compose network.
         - hostname: approval.${MCP_DOMAIN}
-          path: ^/(approve|manage|secrets)/.+
+          path: ^/(approve|manage)/.+
           service: http://approval:8072
         - hostname: approval.${MCP_DOMAIN}
           path: ^/(slack|discord|telegram)/interact$

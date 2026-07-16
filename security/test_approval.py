@@ -540,14 +540,12 @@ def test_gating_pins_are_reported_and_immutable():
     # needs_approval, and no POST can change it.
     c = TestClient(svc.app)
     assert c.get("/gating", params={"source": "gatekeeper"}).json()["modes"] == {
-        "set_gating": "needs_approval",
-        "deploy_tool": "needs_approval",
+        "set_gating": "needs_approval"
     }
     resp = _set_mode(c, "set_gating", "always_allow", source="gatekeeper")
     assert resp.status_code == 403 and "fixed in code" in resp.json()["error"]
     assert c.get("/gating", params={"source": "gatekeeper"}).json()["modes"] == {
-        "set_gating": "needs_approval",
-        "deploy_tool": "needs_approval",
+        "set_gating": "needs_approval"
     }
 
 
@@ -560,8 +558,7 @@ def test_gatekeeper_source_is_wholly_unmanageable():
     assert _set_mode(c, "manage_tools", "blocked", source="gatekeeper").status_code == 403
     svc._STATE["gatekeeper"] = {"catalog": {}, "modes": {"manage_tools": "blocked"}}
     assert c.get("/gating", params={"source": "gatekeeper"}).json()["modes"] == {
-        "set_gating": "needs_approval",
-        "deploy_tool": "needs_approval",
+        "set_gating": "needs_approval"
     }
 
 
@@ -759,8 +756,7 @@ def test_manage_save_respects_pins_and_validates_modes():
     # A save cannot touch the gatekeeper's own tools any more than set_gating can.
     assert r["applied"] == 0 and r["refused"] == {"gatekeeper": ["set_gating", "manage_tools"]}
     assert c.get("/gating", params={"source": "gatekeeper"}).json()["modes"] == {
-        "set_gating": "needs_approval",
-        "deploy_tool": "needs_approval",
+        "set_gating": "needs_approval"
     }
     bad = c.post(f"/manage/{_mint(c)}", json={"changes": {"teltool": {"a": "sideways"}}})
     assert bad.status_code == 400
@@ -926,7 +922,7 @@ def test_manage_forget_wins_over_mode_edits_to_the_same_source():
 
 
 def test_sources_endpoint_reports_liveness_shape():
-    # Internal inventory for deploy_status + the panel's deployed/stale labels:
+    # Internal inventory for the panel's deployed/stale labels:
     # registered = the ~30s startup beacon (deployed-ness), seen = client use.
     c = TestClient(svc.app)
     c.post("/catalog", json={"source": "livetool", "origin": "startup", "tools": [{"name": "a"}]})
@@ -942,220 +938,3 @@ def test_manage_session_carries_registered():
     c.post("/catalog", json={"source": "livetool", "origin": "startup", "tools": [{"name": "a"}]})
     src = TestClient(svc.app).get(f"/manage/{_mint(c)}").json()["sources"]["livetool"]
     assert isinstance(src["registered"], float)
-
-
-# --- the gatekeeper deploy_status helpers (manifest inventory) -------------------------
-
-_GK_SPEC = importlib.util.spec_from_file_location(
-    "gatekeeper_server", Path(__file__).parents[1] / "tools" / "gatekeeper" / "server.py"
-)
-_gk = importlib.util.module_from_spec(_GK_SPEC)
-_GK_SPEC.loader.exec_module(_gk)
-
-
-def test_deploy_status_splits_deployed_stale_and_available():
-    manifests = _gk.load_manifests()  # the real shipped manifests
-    now = 1_000_000.0
-    sources = {
-        "telegram": {"tools": 116, "registered": now - 20, "seen": now - 7200},
-        "xmcp": {"tools": 134, "registered": now - 40 * 86400, "seen": None},
-        "gatekeeper": {"tools": 2, "registered": now - 20, "seen": None},
-    }
-    out = _gk.format_deploy_status(manifests, sources, now=now)
-    # telegram: live beacon -> deployed with last-used; xmcp: old beacon -> stale.
-    assert "telegram: 116 tools, last used 2h ago" in out
-    assert "xmcp: last registered 40d ago" in out
-    # data/lean ship manifests but aren't running -> available, with their needs.
-    assert "data:" in out and "Tiingo API key" in out
-    assert "lean:" in out and "13GB" in out
-    # the gatekeeper never lists itself; manual steps close the message.
-    assert "gatekeeper: 2" not in out
-    assert "COMPOSE_PROFILES" in out
-
-
-def test_deploy_status_all_deployed_needs_no_available_section():
-    manifests = _gk.load_manifests()
-    now = 1_000_000.0
-    sources = {p: {"tools": 5, "registered": now - 10, "seen": None} for p in manifests}
-    out = _gk.format_deploy_status(manifests, sources, now=now)
-    assert "Available to deploy" not in out and "Stale" not in out
-
-
-# --- deploy control: the sidecar<->reconciler bridge -----------------------------------
-
-
-@pytest.fixture()
-def control(tmp_path, monkeypatch):
-    monkeypatch.setenv("DEPLOY_CONTROL_DIR", str(tmp_path))
-    return tmp_path
-
-
-def _write_control(control_dir, name, data):
-    (control_dir / name).write_text(json.dumps(data))
-
-
-def test_deploy_state_reports_reconciler_presence(control):
-    c = TestClient(svc.app)
-    assert c.get("/deploy/state").json()["reconciler"] == "absent"
-    _write_control(
-        control, "inventory.json", {"tools": {"lean": {"deployed": False}}, "updated": time.time()}
-    )
-    got = c.get("/deploy/state").json()
-    assert got["reconciler"] == "live" and got["inventory"]["lean"]["deployed"] is False
-    _write_control(control, "inventory.json", {"tools": {}, "updated": time.time() - 3600})
-    assert c.get("/deploy/state").json()["reconciler"] == "stale"
-
-
-def test_deploy_request_writes_the_single_writer_file(control):
-    c = TestClient(svc.app)
-    _write_control(control, "inventory.json", {"tools": {}, "updated": time.time()})
-    r = c.post("/deploy/request", json={"tool": "lean"}).json()
-    assert r["ok"] is True
-    req = json.loads((control / "request.json").read_text())
-    assert req == {"id": r["id"], "action": "deploy", "tool": "lean", "requested": req["requested"]}
-
-
-def test_deploy_request_refuses_no_reconciler_bad_names_and_in_flight(control):
-    c = TestClient(svc.app)
-    # reconciler absent -> 409 with a pointer, nothing written
-    assert c.post("/deploy/request", json={"tool": "lean"}).status_code == 409
-    assert not (control / "request.json").exists()
-    _write_control(control, "inventory.json", {"tools": {}, "updated": time.time()})
-    # names are validated even before the reconciler's own validation
-    assert c.post("/deploy/request", json={"tool": "../evil"}).status_code == 400
-    # one at a time: an unconsumed request blocks the next
-    assert c.post("/deploy/request", json={"tool": "lean"}).json()["ok"] is True
-    r = c.post("/deploy/request", json={"tool": "data"})
-    assert r.status_code == 409 and "in flight" in r.json()["error"]
-    # consumed (status.last_id catches up) -> a new request may proceed
-    req_id = json.loads((control / "request.json").read_text())["id"]
-    _write_control(control, "status.json", {"last_id": req_id, "phase": "done"})
-    assert c.post("/deploy/request", json={"tool": "data"}).json()["ok"] is True
-
-
-def test_deploy_request_blocks_while_applying(control):
-    c = TestClient(svc.app)
-    _write_control(control, "inventory.json", {"tools": {}, "updated": time.time()})
-    _write_control(control, "request.json", {"id": "r1", "action": "deploy", "tool": "lean"})
-    _write_control(control, "status.json", {"last_id": "r1", "phase": "applying"})
-    assert c.post("/deploy/request", json={"tool": "data"}).status_code == 409
-
-
-def test_deploy_status_formats_reconciler_state():
-    manifests = _gk.load_manifests()
-    now = 1_000_000.0
-    sources = {"telegram": {"tools": 116, "registered": now - 20, "seen": None}}
-    deploy = {
-        "reconciler": "live",
-        "in_flight": False,
-        "status": {"last_id": "r1", "tool": "lean", "phase": "done", "detail": "lean is up"},
-        "inventory": {
-            "data": {"deployed": False, "secrets_ready": True, "missing_secrets": []},
-            "xmcp": {
-                "deployed": False,
-                "secrets_ready": False,
-                "missing_secrets": ["X_OAUTH_CONSUMER_KEY"],
-            },
-        },
-        "request": None,
-    }
-    out = _gk.format_deploy_status(manifests, sources, deploy, now=now)
-    assert "secrets staged: staged ✓" in out  # data, ready
-    assert "missing: X_OAUTH_CONSUMER_KEY" in out  # xmcp, not ready
-    assert "Last deploy operation: lean -> done" in out
-    assert "deploy_tool(<name>)" in out  # the live-reconciler path, step-ordered
-    assert "prerequisites" in out  # step (1): the tool's browser steps lead
-    assert "reconciler is not running" not in out
-
-
-def test_deploy_status_without_reconciler_gives_manual_steps():
-    out = _gk.format_deploy_status(
-        _gk.load_manifests(),
-        {},
-        {"reconciler": "absent", "inventory": {}, "status": {}, "in_flight": False},
-        now=1_000_000.0,
-    )
-    assert "reconciler is not running" in out and "COMPOSE_PROFILES" in out
-
-
-def test_deploy_status_shows_in_flight_operation():
-    out = _gk.format_deploy_status(
-        _gk.load_manifests(),
-        {},
-        {
-            "reconciler": "live",
-            "in_flight": True,
-            "status": {"last_id": "r9", "tool": "lean", "phase": "applying"},
-            "inventory": {},
-            "request": {"id": "r9", "tool": "lean", "action": "deploy"},
-        },
-        now=1_000_000.0,
-    )
-    assert "Deploy in flight: lean (applying)" in out
-
-
-# --- secrets staging sessions: the in-chat secrets form's capability API --------------
-
-
-def _mint_secrets(client, tool="xmcp", fields=None):
-    fields = fields or [{"key": "K1", "label": "Key one", "hint": "h1"}]
-    return client.post("/secrets", json={"tool": tool, "fields": fields}).json()["token"]
-
-
-def test_secrets_session_serves_fields_never_values(control):
-    _write_control(
-        control,
-        "inventory.json",
-        {"tools": {"xmcp": {"missing_secrets": ["K2"]}}, "updated": time.time()},
-    )
-    c = TestClient(svc.app)
-    token = _mint_secrets(
-        c,
-        fields=[
-            {"key": "K1", "label": "Key one", "hint": "h1"},
-            {"key": "K2", "label": "Key two", "hint": "h2"},
-        ],
-    )
-    r = c.get(f"/secrets/{token}")
-    assert r.headers["access-control-allow-origin"] == "*"  # widget iframe, token = credential
-    got = r.json()
-    assert got["tool"] == "xmcp"
-    assert [(f["key"], f["staged"]) for f in got["fields"]] == [("K1", True), ("K2", False)]
-    assert "values" not in json.dumps(got)
-
-
-def test_secrets_save_hands_off_and_is_one_shot(control):
-    (control / "staging.json").write_text("{}")
-    c = TestClient(svc.app)
-    token = _mint_secrets(c)
-    r = c.post(f"/secrets/{token}", json={"values": {"K1": "sk-live-123"}}).json()
-    assert r == {"ok": True, "staged": ["K1"]}
-    handoff = json.loads((control / "staging.json").read_text())
-    assert handoff == {"id": token, "tool": "xmcp", "values": {"K1": "sk-live-123"}}
-    # One-shot: the session is consumed; GET and re-POST both 404.
-    assert c.get(f"/secrets/{token}").status_code == 404
-    assert c.post(f"/secrets/{token}", json={"values": {"K1": "x"}}).status_code == 404
-
-
-def test_secrets_save_validates_keys_and_one_at_a_time(control):
-    (control / "staging.json").write_text("{}")
-    c = TestClient(svc.app)
-    token = _mint_secrets(c)
-    # Only session-declared keys are accepted; the session survives a 400.
-    bad = c.post(f"/secrets/{token}", json={"values": {"EVIL": "x"}})
-    assert bad.status_code == 400 and "EVIL" in bad.json()["error"]
-    assert c.post(f"/secrets/{token}", json={"values": {}}).status_code == 400
-    # An unconsumed handoff blocks a new save (one staging at a time).
-    (control / "staging.json").write_text(
-        json.dumps({"id": "other", "tool": "t", "values": {"A": "b"}})
-    )
-    assert c.post(f"/secrets/{token}", json={"values": {"K1": "v"}}).status_code == 409
-    # Missing staging file entirely = reconciler never initialized.
-    (control / "staging.json").unlink()
-    assert c.post(f"/secrets/{token}", json={"values": {"K1": "v"}}).status_code == 409
-
-
-def test_secrets_mint_validates(control):
-    c = TestClient(svc.app)
-    assert c.post("/secrets", json={"tool": "../evil", "fields": [{"key": "A"}]}).status_code == 400
-    assert c.post("/secrets", json={"tool": "xmcp", "fields": []}).status_code == 400

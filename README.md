@@ -35,7 +35,7 @@ adds the shared security stack (OAuth, egress wall, guardrail, approvals), not a
 | `workspace` | Google Workspace — Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Chat — as your account | [taylorwilsdon/google_workspace_mcp](https://github.com/taylorwilsdon/google_workspace_mcp), vendored |
 | `data` | Crypto market data into a local parquet lake, exportable to the backtester | [OpenBB](https://openbb.co) (Tiingo provider) |
 | `lean` | Self-hosted backtests of agent-authored algorithms over the lake's data | [QuantConnect Lean](https://github.com/QuantConnect/Lean), pinned engine image |
-| `gatekeeper` | The control plane: per-tool permissions, in-chat panels, chat-driven deploys | native (always on, like the sidecars) |
+| `gatekeeper` | The control plane: per-tool permissions via the in-chat panel | native (always on, like the sidecars) |
 
 ## FAQs
 Each tool is opt-in via a compose profile named after it — only the tools in

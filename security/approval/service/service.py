@@ -33,7 +33,6 @@ import html
 import json
 import logging
 import os
-import re
 import secrets
 import time
 import urllib.parse
@@ -635,9 +634,8 @@ _PROVIDERS = {
 # widget; PINNED entries are immutable at runtime -- changing one takes a code
 # change right here, by design.
 _PINNED = {
-    # The gate-changer and the deploy-requester stay human-gated, as code constants.
+    # The gate-changer stays human-gated, as a code constant.
     ("gatekeeper", "set_gating"): "needs_approval",
-    ("gatekeeper", "deploy_tool"): "needs_approval",
 }
 # The gatekeeper's own tools are not runtime-manageable at all: set_gating is pinned
 # above, and manage_tools is inherently human-in-the-loop (nothing changes without the
@@ -728,8 +726,8 @@ async def catalog(request):  # type: ignore[no-untyped-def]
 async def sources(request):  # type: ignore[no-untyped-def]
     """Internal: every known source with its liveness timestamps. `registered` is
     stamped by each server's ~30s startup beacon, so recency == currently deployed;
-    `seen` is the last real client tools/list. The gatekeeper's deploy_status and
-    the manage panel's deployed/stale labels read this shape."""
+    `seen` is the last real client tools/list. The manage panel's deployed/stale
+    labels read this shape."""
     return JSONResponse(
         {
             src: {
@@ -740,176 +738,6 @@ async def sources(request):  # type: ignore[no-untyped-def]
             for src, st in _STATE.items()
         }
     )
-
-
-# ---------------------------------------------------------------------------
-# Deploy control: the bridge between chat and the HOST reconciler (deploy/host/).
-# The sidecar may only WRITE request.json -- the reconciler owns status.json and
-# inventory.json (single-writer files; ownership enforces the split). A request
-# is only ever written by the gatekeeper's deploy_tool, which is PINNED
-# needs_approval: a human approved before this endpoint is reached. The reconciler
-# re-validates everything anyway (shipped tools only, secrets staged).
-def _control_dir() -> str:
-    return os.getenv("DEPLOY_CONTROL_DIR", "")
-
-
-def _read_control(name: str) -> dict | None:
-    path = os.path.join(_control_dir(), name)
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
-
-
-def _deploy_state() -> dict:
-    """The merged view deploy_status/deploy_tool read: reconciler presence, current
-    inventory, the last operation, and whether a request is still unconsumed."""
-    inventory = _read_control("inventory.json")
-    status = _read_control("status.json") or {}
-    req = _read_control("request.json") or {}
-    fresh = bool(inventory and time.time() - inventory.get("updated", 0) < 120)
-    in_flight = (
-        bool(req.get("id") and req["id"] != status.get("last_id"))
-        or status.get("phase") == "applying"
-    )
-    return {
-        "reconciler": "live" if fresh else ("stale" if inventory else "absent"),
-        "inventory": (inventory or {}).get("tools", {}),
-        "status": status,
-        "in_flight": in_flight,
-        "request": {k: req.get(k) for k in ("id", "tool", "action")} if req.get("id") else None,
-    }
-
-
-async def deploy_state(request):  # type: ignore[no-untyped-def]
-    return JSONResponse(_deploy_state())
-
-
-# ---------------------------------------------------------------------------
-# Secrets staging sessions: the in-chat secrets widget's capability API.
-# Values flow BROWSER -> here -> staging.json -> the host reconciler writes the
-# tool's .env. They never enter chat content, tool results, or the model's
-# context, and NO endpoint ever returns a stored value -- GET serves field
-# definitions plus staged/missing booleans only. staging.json is created by
-# reconcile.py --init as uid-999-owned, group-readable, mode 660 (not world-
-# readable like the other control files); the reconciler consumes it by
-# blanking it to {} the moment the .env is written.
-_SECRET_SESSIONS: dict[str, dict] = {}  # token -> {"tool", "fields", "created"}
-
-
-def _prune_secret_sessions() -> None:
-    now = time.time()
-    for token in [t for t, r in _SECRET_SESSIONS.items() if now - r["created"] > _TTL_SECONDS]:
-        _SECRET_SESSIONS.pop(token, None)
-
-
-async def secrets_mint(request):  # type: ignore[no-untyped-def]
-    """Internal-only (the tunnel never routes the bare path): the gatekeeper's
-    stage_secrets tool starts a session carrying the manifest's field definitions."""
-    _prune_secret_sessions()
-    body = await request.json()
-    tool, fields = str(body.get("tool", "")), body.get("fields") or []
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", tool) or not fields:
-        return JSONResponse({"ok": False, "error": "invalid session"}, status_code=400)
-    token = secrets.token_urlsafe(24)
-    _SECRET_SESSIONS[token] = {"tool": tool, "fields": fields, "created": time.time()}
-    return JSONResponse({"ok": True, "token": token})
-
-
-async def secrets_session(request):  # type: ignore[no-untyped-def]
-    if request.method == "OPTIONS":
-        return Response(status_code=204, headers=_MANAGE_CORS)
-    _prune_secret_sessions()
-    rec = _SECRET_SESSIONS.get(request.path_params["token"])
-    if rec is None:
-        return JSONResponse(
-            {"ok": False, "error": "expired"}, status_code=404, headers=_MANAGE_CORS
-        )
-    tool = rec["tool"]
-    if request.method == "GET":
-        missing = set(
-            ((_deploy_state().get("inventory") or {}).get(tool) or {}).get(
-                "missing_secrets", [f["key"] for f in rec["fields"]]
-            )
-        )
-        return JSONResponse(
-            {
-                "ok": True,
-                "tool": tool,
-                "fields": [{**f, "staged": f["key"] not in missing} for f in rec["fields"]],
-            },
-            headers=_MANAGE_CORS,
-        )
-    # POST: the user's Save. Only keys this session declared are accepted, and a
-    # prior unconsumed handoff blocks a new one (one staging at a time, like deploys).
-    values = (await request.json()).get("values") or {}
-    allowed = {f["key"] for f in rec["fields"]}
-    values = {k: str(v) for k, v in values.items() if v}
-    if not values or not set(values) <= allowed:
-        bad = sorted(set(values) - allowed)
-        return JSONResponse(
-            {"ok": False, "error": f"unexpected keys {bad}" if bad else "no values"},
-            status_code=400,
-            headers=_MANAGE_CORS,
-        )
-    staging_path = os.path.join(_control_dir(), "staging.json")
-    try:
-        with open(staging_path) as f:
-            pending = json.load(f)
-    except (OSError, ValueError):
-        pending = None
-    if pending is None:
-        return JSONResponse(
-            {"ok": False, "error": "staging unavailable (reconciler not initialized)"},
-            status_code=409,
-            headers=_MANAGE_CORS,
-        )
-    if pending.get("id"):
-        return JSONResponse(
-            {"ok": False, "error": "another staging is being applied; retry shortly"},
-            status_code=409,
-            headers=_MANAGE_CORS,
-        )
-    token = request.path_params["token"]
-    with open(staging_path, "w") as f:
-        json.dump({"id": token, "tool": tool, "values": values}, f)
-    _SECRET_SESSIONS.pop(token, None)  # one-shot
-    log.info("secrets staged for %s: %d value(s) handed to the reconciler", tool, len(values))
-    return JSONResponse({"ok": True, "staged": sorted(values)}, headers=_MANAGE_CORS)
-
-
-async def deploy_request(request):  # type: ignore[no-untyped-def]
-    body = await request.json()
-    tool = str(body.get("tool", ""))
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", tool):
-        return JSONResponse({"ok": False, "error": "invalid tool name"}, status_code=400)
-    state = _deploy_state()
-    if state["reconciler"] == "absent":
-        return JSONResponse(
-            {"ok": False, "error": "reconciler not installed (see deploy/host/README.md)"},
-            status_code=409,
-        )
-    if state["in_flight"]:
-        return JSONResponse(
-            {"ok": False, "error": "another deploy is in flight; one at a time"},
-            status_code=409,
-        )
-    req = {
-        "id": secrets.token_urlsafe(8),
-        "action": "deploy",
-        "tool": tool,
-        "requested": time.time(),
-    }
-    try:
-        with open(os.path.join(_control_dir(), "request.json"), "w") as f:
-            json.dump(req, f)
-    except OSError as exc:
-        return JSONResponse(
-            {"ok": False, "error": f"could not write the request: {exc}"}, status_code=500
-        )
-    log.info("deploy requested: %s (id %s)", tool, req["id"])
-    return JSONResponse({"ok": True, "id": req["id"]})
 
 
 async def gating(request):  # type: ignore[no-untyped-def]
@@ -1079,10 +907,6 @@ app = Starlette(
         Route("/gating", gating, methods=["GET", "POST"]),
         Route("/catalog", catalog, methods=["GET", "POST"]),
         Route("/sources", sources, methods=["GET"]),
-        Route("/deploy/state", deploy_state, methods=["GET"]),
-        Route("/deploy/request", deploy_request, methods=["POST"]),
-        Route("/secrets", secrets_mint, methods=["POST"]),
-        Route("/secrets/{token}", secrets_session, methods=["GET", "POST", "OPTIONS"]),
         Route("/manage", manage_mint, methods=["POST"]),
         Route("/manage/{token}", manage_session, methods=["GET", "POST", "OPTIONS"]),
         Route("/healthz", healthz, methods=["GET"]),

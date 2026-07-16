@@ -86,8 +86,8 @@ ENV
 sed -e "s|__NAME__|${NAME}|g" -e "s|__PORT__|${PORT}|g" \
     "$ROOT/scripts/templates/Dockerfile.template" > "$DIR/Dockerfile"
 
-# Deploy manifest: what the gatekeeper's deploy_status (and the chat-driven deploy
-# flow) reads to describe this tool -- fill in summary, secrets, and notes.
+# Deploy manifest: the tool's identity record (the stack validator enumerates
+# tools from these) -- fill in summary, secrets, and notes.
 cat > "$DIR/deploy.json" <<JSON
 {
   "title": "${NAME}",

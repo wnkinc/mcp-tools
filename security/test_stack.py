@@ -5,7 +5,7 @@ profiles, squid listener + allowlist, tunnel route, ports). Each rule here encod
 a mistake class that actually happened -- or one whose symptom (502s, OAuth 401s)
 is painful enough to pre-empt -- so a gap fails CI with a message naming the
 missing piece instead of surfacing in production. Tools are enumerated from their
-deploy.json manifests (the same set the deploy flow ships); substrate services
+deploy.json manifests (each tool's identity record); substrate services
 (egress, guardrail, approval, gatekeeper, cloudflared) have no manifest and are
 not covered.
 """

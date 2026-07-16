@@ -20,8 +20,7 @@ tools/                     # one tool per dir: server.py + Dockerfile + requirem
                            #   deploy.json. WHICH tools exist and what each is: the README's
                            #   "The tools" table (the deploy.json manifests are the machine source)
 deploy/                    # cloudflare/ = shared ingress (tunnel+DNS, both paths);
-                           #   aws/ = EC2 VM running this stack (reads the ingress stack);
-                           #   host/ = deploy reconciler (chat-approved deploys; its README)
+                           #   aws/ = EC2 VM running this stack (reads the ingress stack)
 scripts/new-tool.sh        # stamp a new tool (.claude/skills/new-tool = the decision procedure)
 docs/                      # DEPLOY.md chooser -> deploy/{local,aws}.md runbooks; ARCHITECTURE.md
 ```

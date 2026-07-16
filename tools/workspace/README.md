@@ -20,6 +20,5 @@ Google OAuth, the egress wall, the guardrail, and approvals.
   transports (`pysocks`/`httplib2` are in the lock) — a plain client that
   ignores proxy env has nowhere to dial.
 
-Secrets and prerequisites are declared in [deploy.json](deploy.json) (the
-chat-driven deploy flow reads them); see [env.example](env.example) for manual
-setup.
+Secrets and prerequisites are declared in [deploy.json](deploy.json), the
+tool's manifest; see [env.example](env.example) for setup.

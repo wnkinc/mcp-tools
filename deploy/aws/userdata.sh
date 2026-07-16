@@ -1,7 +1,6 @@
 #!/bin/bash
 # EC2 user-data for the mcp-tools VM. __main__.py renders this template by
-# replacing the __UPPERCASE__ tokens (the reconciler sed below carries its own
-# __REPO__/__RUN_AS__ tokens -- distinct names, untouched by that render).
+# replacing the __UPPERCASE__ tokens.
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
@@ -34,12 +33,6 @@ BEDROCK_GUARDRAIL_ID=__GUARDRAIL_ID__
 BEDROCK_GUARDRAIL_VERSION=DRAFT
 AWS_REGION=__REGION__
 ENVEOF
-
-# The deploy reconciler: applies chat-approved tool deploys (deploy/host/README.md).
-python3 deploy/host/reconcile.py --init --repo /opt/mcp-tools --user root
-sed 's|__REPO__|/opt/mcp-tools|g; s|__RUN_AS__|root|g' deploy/host/mcp-reconciler.service \
-  > /etc/systemd/system/mcp-reconciler.service
-systemctl daemon-reload && systemctl enable --now mcp-reconciler
 
 # Per-tool secrets (tools/<tool>/.env) arrive later over SSM; required:false in
 # compose lets the stack come up while a tool waits for its secrets.

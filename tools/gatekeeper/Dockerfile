@@ -31,10 +31,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 COPY --from=builder /app/.venv /app/.venv
 COPY security/ /app/security/
-# The whole tools/ tree (small, secrets excluded by .dockerignore): deploy_status
-# reads every tool's deploy.json, and baking the tree means a rebuild picks up new
-# tools' manifests with no Dockerfile change.
-COPY tools/ /app/tools/
+COPY tools/gatekeeper/ /app/tools/gatekeeper/
 RUN mkdir -p /app/state && chown -R app:app /app/state
 
 USER app

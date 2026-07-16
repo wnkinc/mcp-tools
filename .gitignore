@@ -21,6 +21,3 @@ vendor/
 
 # Claude Code local (per-machine) settings; the deploy skill in .claude/skills IS committed.
 .claude/settings.local.json
-
-# deploy reconciler control files (runtime state, single-writer protocol)
-deploy/host/control/

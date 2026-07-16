@@ -1,6 +1,6 @@
-"""Every shipped tool's deploy manifest parses and carries what the deploy flow
-needs -- the gatekeeper's deploy_status renders these, and the chat-driven deploy
-of a later phase consumes them, so a malformed manifest should fail CI, not chat."""
+"""Every shipped tool's deploy manifest parses and carries the tool's identity
+record -- the stack validator enumerates tools from these, and deployers read
+them for secrets/prerequisites -- so a malformed manifest should fail CI."""
 
 import json
 from pathlib import Path

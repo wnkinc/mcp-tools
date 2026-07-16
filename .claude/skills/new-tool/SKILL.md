@@ -81,9 +81,9 @@ block, CI matrix + dependabot entries) and the decisions above:
 
 ## After merge (deployment — the user drives)
 
-Deploys are chat-driven: `stage_secrets('<name>')` (in-chat form) then
-`deploy_tool('<name>')` (human-approved, applied by the host reconciler), or
-manually per docs/deploy/local.md. Remind the user of `prerequisites` browser
+Deploys are manual, per docs/deploy/local.md: fill `tools/<name>/.env`, add the
+profile to `COMPOSE_PROFILES`, `up -d --build` with both `-f` files. Remind the
+user of `prerequisites` browser
 steps and to add the connector: `https://<subdomain>.<domain>/mcp` in
 claude.ai, plus the OAuth redirect URI on the shared Google client. A changed
 squid.compose.conf needs `docker compose restart egress`; a new tunnel route

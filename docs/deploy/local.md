@@ -189,8 +189,7 @@ root `.env`, and all the shared infrastructure (tunnel routes for every shipped 
 the OAuth client, egress listeners) already exists. Adding a tool you skipped:
 
 1. `cp tools/<name>/env.example tools/<name>/.env` and fill its secrets — each tool's
-   `tools/<name>/deploy.json` manifest says exactly which and where to get them (or
-   ask the gatekeeper's `deploy_status` in chat).
+   `tools/<name>/deploy.json` manifest says exactly which and where to get them.
 2. Add `https://<name>.example.com/auth/callback` to the shared Google OAuth client's
    authorized redirect URIs (skip if you pre-added all tools' callbacks in step 4).
 3. Add `<name>` to `COMPOSE_PROFILES` in the root `.env`, then
@@ -200,12 +199,6 @@ the OAuth client, egress listeners) already exists. Adding a tool you skipped:
 
 The tool appears in the gatekeeper's manage panel within ~30 s of starting (its
 health probe registers it), pre-gateable before Claude ever connects.
-
-**Chat-driven instead:** install the deploy reconciler once
-(`deploy/host/README.md` — three commands) and steps 3–4 become a conversation:
-the agent checks `deploy_status`, tells you which secrets to stage and where they
-come from, and `deploy_tool(<name>)` applies the deploy after your approval. Only
-step 1 (secrets on the host) and the Google/Claude browser steps stay manual.
 
 Removing one is the mirror: delete it from `COMPOSE_PROFILES`,
 `up -d --remove-orphans` (both `-f` files!), remove the connector in Claude, and

@@ -110,21 +110,12 @@ services:
       # The sidecar is the sole authority on tool modes; the operator's choices
       # must survive a restart. /app/state is the image's app-owned writable dir.
       APPROVAL_STATE_FILE: /app/state/state.json
-      # Deploy control files shared with the HOST reconciler (deploy/host/): the
-      # sidecar may only WRITE request.json there (single-writer protocol; the
-      # reconciler owns status/inventory). Absent/unmounted = deploys unavailable.
-      DEPLOY_CONTROL_DIR: /app/control
       # Slack posts leave through the egress wall like everything else.
       HTTPS_PROXY: http://egress:3132
       HTTP_PROXY: http://egress:3132
       NO_PROXY: localhost,127.0.0.1
     volumes:
       - approval-state:/app/state
-      # Host bind, not a named volume: the reconciler runs OUTSIDE docker and needs
-      # a plain path. Gitignored; created by reconcile.py --init (which sets the
-      # single-writer file owners). Missing on hosts without the reconciler -> the
-      # bind creates an empty dir and deploys report themselves unavailable.
-      - ./deploy/host/control:/app/control
     networks:
       - internal
     healthcheck:
