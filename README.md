@@ -6,6 +6,30 @@ gated by Google OAuth (verified-email allowlist). Runs on your own Linux box or
 on an EC2 VM that `pulumi up` provisions — same stack either way
 (**[docs/DEPLOY.md](docs/DEPLOY.md)** is the chooser).
 
+## What you'll need
+
+Gather these before you start — the list is the same either way you host, and
+every runbook step walks through the setup. Total out-of-pocket: nothing locally,
+~$15/mo if you let Pulumi run the EC2 VM.
+
+| | What for |
+|---|---|
+| **A Linux box with Docker** (compose v2.20+) — or an AWS account instead | runs the stack; the AWS path provisions a t3.small for you |
+| **A domain on Cloudflare** (free plan is fine) + an API token (`Cloudflare Tunnel:Edit` + `DNS:Edit`) | public HTTPS ingress — one subdomain per tool, no inbound ports opened |
+| **[Pulumi CLI](https://www.pulumi.com/docs/install/)** | creates the tunnel + wildcard DNS (and the VM on AWS); `pulumi login --local` keeps state on your machine |
+| **A Google Cloud OAuth client** (free) | the "Sign in with Google" gate on every tool, locked to your email allowlist |
+| **A Hugging Face token** + access to `meta-llama/Llama-Prompt-Guard-2-86M` (free, granted in minutes) | the local guardrail model that screens untrusted tool output. Local path only — AWS uses Bedrock Guardrails |
+| **An approval channel** — a Slack, Discord, or Telegram bot | where Approve/Deny cards land for gated tool calls. Pick a platform the agent itself does *not* operate |
+| **Per-tool secrets** — e.g. Telegram API credentials | only for the tools you turn on; each documents its own `tools/<tool>/env.example` |
+
+The one deploy-time decision is **which tools to run** (`COMPOSE_PROFILES` in
+`.env`) — the security substrate comes up on its own, and permissions, approvals,
+and adding tools later are all runtime changes. Full detail and the local-vs-AWS
+chooser: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+
+Just hacking on a tool? None of the above — `docker compose up --build` runs the
+stack locally with auth and tunnel off.
+
 ## Quick start
 
 #### Terminal
