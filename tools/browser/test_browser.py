@@ -59,6 +59,15 @@ def test_child_caps_are_trimmable(monkeypatch):
     assert args[args.index("--caps") + 1] == "pdf"
 
 
+def test_child_output_dir_and_cwd_agree(monkeypatch):
+    # The engine resolves relative user filenames against cwd, not --output-dir;
+    # build_proxy runs the child IN the output dir so both land in the volume.
+    monkeypatch.setenv("HOME", "/somewhere")
+    args = server.build_child_args("cli.js")
+    assert args[args.index("--output-dir") + 1] == "/somewhere/output"
+    assert server.output_dir() == "/somewhere/output"
+
+
 def test_child_env_points_at_the_entrypoint_display(monkeypatch):
     monkeypatch.delenv("DISPLAY", raising=False)
     assert server.build_child_env()["DISPLAY"] == ":99"
@@ -99,15 +108,17 @@ m.run()
 '''
 
 
-def _dummy_proxy(tmp_path):
+def _dummy_proxy(tmp_path, monkeypatch):
+    # HOME -> tmp_path: build_proxy creates and spawns the child in HOME/output.
+    monkeypatch.setenv("HOME", str(tmp_path))
     child = tmp_path / "cli.py"
     child.write_text(_CHILD)
     # command=python: the dummy child ignores the engine argv it's handed.
     return server.build_proxy(engine_cli=str(child), command=sys.executable)
 
 
-def test_proxy_forwards_to_stdio_child(tmp_path):
-    proxy = _dummy_proxy(tmp_path)
+def test_proxy_forwards_to_stdio_child(tmp_path, monkeypatch):
+    proxy = _dummy_proxy(tmp_path, monkeypatch)
 
     from fastmcp import Client
 
@@ -128,7 +139,7 @@ def test_proxy_forwards_to_stdio_child(tmp_path):
 def test_live_view_reports_down_when_nothing_listens(tmp_path, monkeypatch):
     # Point the probe at a port nothing binds, whatever the test host runs.
     monkeypatch.setattr(server, "VIEW_PORT", 1)
-    proxy = _dummy_proxy(tmp_path)
+    proxy = _dummy_proxy(tmp_path, monkeypatch)
 
     from fastmcp import Client
 

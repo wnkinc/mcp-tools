@@ -163,6 +163,13 @@ docker compose ps
 docker compose logs -f telegram    # expect: "OAuth enabled (Google) at https://telegram..."
 ```
 
+**Browser tool only — one-time Drive consent.** The browser's artifacts
+(downloads, recordings, PDFs) auto-sync to a `browser-artifacts` folder in your
+Google Drive and are deleted locally after upload. That sync needs one consent
+click: `docker compose logs browser-sync` prints the exact command to run
+(also documented in `tools/browser/env.example`). Until then the sidecar just
+idles — nothing breaks.
+
 ## 8. Verify a public endpoint
 
 ```bash

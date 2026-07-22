@@ -64,7 +64,10 @@ ENV PATH="/app/.venv/bin:$PATH" \
 COPY --from=builder /app/.venv /app/.venv
 COPY security/ /app/security/
 COPY tools/browser/ /app/tools/browser/
-RUN mkdir -p /app/state && chown -R app:app /app/state
+# state/output is its own mount point (the browser-artifacts volume the sync
+# sidecar drains); pre-creating it app-owned is what gives the volume app
+# ownership on first use.
+RUN mkdir -p /app/state/output && chown -R app:app /app/state
 
 USER app
 WORKDIR /app/tools/browser

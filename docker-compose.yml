@@ -255,6 +255,59 @@ services:
       NO_PROXY: guardrail,approval,localhost,127.0.0.1
     volumes:
       - browser-state:/app/state
+      # Artifacts (downloads, PDFs, recordings — server.py's --output-dir) get their
+      # own volume, nested over browser-state, so the sync sidecar below can drain
+      # them WITHOUT ever seeing the Chromium profile or the OAuth store.
+      - browser-artifacts:/app/state/output
+    networks:
+      - internal
+
+  # Drains the browser's artifacts to the operator's Google Drive (folder
+  # "browser-artifacts") and deletes local copies after confirmed upload — files
+  # land where the operator actually views them, and the volume stays empty (the
+  # hygiene story). Not a tool: no MCP surface, no approval/guardrail wiring.
+  # --min-age skips files still being written (a recording uploads ~a minute after
+  # it ends, never mid-write); .crdownload partials are excluded outright.
+  # Engine session debris (page-*.yml snapshots, console-*.log) is NOT worth a
+  # Drive round-trip: excluded from the move, deleted locally after an hour
+  # instead — old enough that no in-flight tool call still references it.
+  # One-time setup mints a drive.file-scoped token into browser-sync-state
+  # (see tools/browser/env.example) — that scope only reaches files this remote
+  # created, so a compromised sync job can't read the rest of Drive. Until the
+  # token exists the loop just idles.
+  browser-sync:
+    image: rclone/rclone:1.72.0@sha256:0eb18825ac9732c21c11d654007170572bbd495352bb6dbb624f18e4f462c496
+    profiles: ["browser"]   # runs exactly when the browser does
+    restart: unless-stopped
+    environment:
+      RCLONE_CONFIG: /config/rclone/rclone.conf
+      # rclone is Go: unlike Chromium it honors the proxy env vars, so the wall
+      # needs no launch flags. Its listener allows only the Drive endpoints.
+      HTTPS_PROXY: http://egress:3137
+      HTTP_PROXY: http://egress:3137
+      NO_PROXY: localhost,127.0.0.1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          if [ -f "$$RCLONE_CONFIG" ]; then
+            rclone move /artifacts gdrive:browser-artifacts \
+              --min-age 30s --exclude '*.crdownload' \
+              --exclude 'page-*.yml' --exclude 'console-*.log' \
+              --delete-empty-src-dirs
+          else
+            echo "browser-sync: idling -- no Drive token yet. Mint it once (details in tools/browser/env.example):"
+            echo "  docker run --rm -it --network host -v mcp-tools_browser-sync-state:/config/rclone rclone/rclone:1.72.0 config"
+          fi
+          rclone delete /artifacts --min-age 1h \
+            --include 'page-*.yml' --include 'console-*.log'
+          sleep 30
+        done
+    volumes:
+      - browser-artifacts:/artifacts
+      # rclone rewrites the refreshed OAuth token into its config, so the config
+      # mount must be writable and persistent.
+      - browser-sync-state:/config/rclone
     networks:
       - internal
 
@@ -267,6 +320,8 @@ networks:
 
 volumes:
   browser-state:
+  browser-artifacts:
+  browser-sync-state:
   workspace-state:
   approval-state:
   gatekeeper-state:

@@ -51,6 +51,12 @@ def _is_truthy(value: str | None) -> bool:
     return bool(value) and value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def output_dir() -> str:
+    """Where engine artifacts land (compose mounts the browser-artifacts volume
+    here; the browser-sync sidecar drains it to Drive)."""
+    return os.path.join(os.getenv("HOME", "/app/state"), "output")
+
+
 class StripOutputSchemas(Middleware):
     """Null proxied tools' outputSchema at list time.
 
@@ -87,8 +93,8 @@ def build_child_args(engine_cli: str = ENGINE_CLI) -> list[str]:
     proxy = os.getenv("HTTPS_PROXY", "").strip()
     if proxy:
         args += ["--proxy-server", proxy]
-    # Artifacts (screenshots, PDFs, traces) land in the state volume, not cwd.
-    args += ["--output-dir", os.path.join(os.getenv("HOME", "/app/state"), "output")]
+    # Artifacts (screenshots, PDFs, traces) land in the artifacts volume, not cwd.
+    args += ["--output-dir", output_dir()]
     return args
 
 
@@ -109,7 +115,15 @@ def _view_listening() -> bool:
 
 def build_proxy(engine_cli: str = ENGINE_CLI, command: str = "node"):  # type: ignore[no-untyped-def]
     """Front the stdio child with a fastmcp proxy serve() can wrap."""
-    transport = StdioTransport(command, build_child_args(engine_cli), env=build_child_env())
+    # The child RUNS in the output dir: the engine resolves user-supplied
+    # relative paths (browser_pdf_save's filename, trace names) against its cwd,
+    # not --output-dir, so any other cwd sends those writes outside the synced
+    # volume (EACCES on the read-only image tree).
+    artifacts = output_dir()
+    os.makedirs(artifacts, exist_ok=True)
+    transport = StdioTransport(
+        command, build_child_args(engine_cli), env=build_child_env(), cwd=artifacts
+    )
     proxy = create_proxy(Client(transport), name="browser")
     proxy.add_middleware(StripOutputSchemas())
 

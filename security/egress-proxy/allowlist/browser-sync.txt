@@ -1,0 +1,7 @@
+# browser-sync egress allowlist (squid dstdomain). One host per line.
+# rclone -> Google Drive only: API + upload endpoints live under googleapis.com;
+# accounts.google.com serves the one-time OAuth consent. Anything else is denied,
+# so even a fully compromised sync job can only talk to Drive.
+www.googleapis.com
+oauth2.googleapis.com
+accounts.google.com
